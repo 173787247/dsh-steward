@@ -1,0 +1,14 @@
+node_modules/
+*.log
+
+# Credentials. Same rules as the plugin repos: match every *.env rather than only
+# files named .env, because examples/test.env is exactly the shape that slips
+# through, then re-include the templates.
+.env
+.env.*
+*.env
+!*.env.example
+!*.env.template
+*.pem
+*.key
+credentials*.yaml

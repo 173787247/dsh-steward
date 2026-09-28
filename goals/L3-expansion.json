@@ -1,0 +1,28 @@
+{
+  "layer": "L3",
+  "name": "能力扩展",
+  "note": "这一层和 L4 是供给源。L2 做完就空，而还能做什么是开放集合 —— 所以系统永远不会没有下一步。",
+  "goals": [
+    {
+      "id": "L3.1",
+      "objective": "把 GA 规格里可抄的六条落成 dsh 的能力",
+      "evidence": "test -f ~/.dsh/profiles/web/node_modules/dsh-steward/lib/turn-reminder.mjs",
+      "verify": "ls ~/.dsh/profiles/web/node_modules/dsh-steward/ 2>/dev/null || echo 'NOT INSTALLED'",
+      "why": "loop-archaeologist 给了六条，都带证据。"
+    },
+    {
+      "id": "L3.2",
+      "objective": "目标队列接上 systemd timer（每 15 分钟跑 evidence，只报告不动手）",
+      "evidence": "systemctl --user is-enabled dsh-steward.timer >/dev/null 2>&1",
+      "verify": "systemctl --user list-timers 'dsh-steward*' --no-pager 2>/dev/null",
+      "why": "GOAL-QUEUE.zh.md 的最小形态。第一版只报告 —— 约束三：监督者先报告后动手。"
+    },
+    {
+      "id": "L3.3",
+      "objective": "mall 项目的 Layer 3-7：竞争图谱 / 相似度 / 招商缺口 / 聚类",
+      "evidence": "test -f ~/src/dsh-steward/artifacts/mall_competition.json",
+      "verify": "ls -la ~/src/dsh-steward/artifacts/ 2>/dev/null || echo \"NOT BUILT\"",
+      "why": "报告里描述的七层，实际只做到索引和特征。它是 L3 里唯一有真实数据支撑的。产出写进本仓的 artifacts/，不指向任何外部目录。"
+    }
+  ]
+}

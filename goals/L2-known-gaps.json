@@ -1,0 +1,35 @@
+{
+  "layer": "L2",
+  "name": "已知缺口",
+  "note": "已经发现、还没做的。这一层是有限的 —— 做完就空，所以它下面是 L3/L4。",
+  "goals": [
+    {
+      "id": "L2.1",
+      "objective": "worthIndexing 改成 C 方案：短消息逐条 + 按会话聚合的对话节奏条目",
+      "evidence": "node ~/src/dsh-wsl-new/_shared/vecmem-index.mjs sessions --dry 2>&1 | grep -qE 'short-turn|节奏|rhythm'",
+      "verify": "node ~/src/dsh-wsl-new/_shared/vecmem-index.mjs sessions --dry 2>&1 | tail -6",
+      "why": "分类器已改（13/13 通过），聚合条目还没在会话循环里实现。实测 2,478 轮真人消息被 60 字符规则拒掉 63%。"
+    },
+    {
+      "id": "L2.2",
+      "objective": "把 invariants/ 和 check-recovery.sh 设为不可自改（评判者不能被被评判者修改）",
+      "evidence": "test ! -w ~/src/cordis-dsh-audit/invariants/run.mjs && test ! -w ~/src/dsh-wsl-kit/scripts/check-recovery.sh",
+      "verify": "ls -l ~/src/cordis-dsh-audit/invariants/run.mjs ~/src/dsh-wsl-kit/scripts/check-recovery.sh",
+      "why": "DGM 四道防线的枢轴：能改的东西不能包括评判它的东西。现在两样都是可写的。"
+    },
+    {
+      "id": "L2.3",
+      "objective": "vecmem 恢复演练：从一个备份真的还原一次",
+      "evidence": "test -f ~/.dsh/vecmem/.restore-drill-passed",
+      "verify": "cat ~/.dsh/vecmem/.restore-drill-passed 2>/dev/null || echo 'NOT DONE'",
+      "why": "L0.6 的下半句。SRE 调研说这是单机最值钱的实践。"
+    },
+    {
+      "id": "L2.4",
+      "objective": "应用 dsh-cordis-backport 的三个补丁到线上 cordis",
+      "evidence": "test -f ~/src/cordis-dsh-audit/backport/.applied",
+      "verify": "node -e \"const c=require('crypto'),f=require('fs');const h=c.createHash('md5').update(f.readFileSync(process.env.HOME+'/.local/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/cordis/lib/index.js')).digest('hex').slice(0,8);console.log(h);process.exit(h==='2e0212db'?0:1)\"",
+      "why": "2026-09-28 完成并差分验证。线上缺陷：插件在 update 时抛异常会逃逸成 unhandled rejection 打死进程（i5 场景 5 项全 missing）；补丁后 update() 干净 reject。19 agreed / 0 violated / 1 divergent，零回归。备份 ~/.dsh/cordis-backup-20260928_225815，下次重启生效。"
+    }
+  ]
+}

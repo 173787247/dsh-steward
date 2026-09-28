@@ -1,0 +1,50 @@
+{
+  "layer": "L0",
+  "name": "存活",
+  "blocks": "everything",
+  "note": "唯一能打断一切的层。dsh 起不来的时候可能连网都没有，所以这一层的 evidence 必须能离线跑。",
+  "goals": [
+    {
+      "id": "L0.1",
+      "objective": "~/.dsh/.env 里没有 DSH_ 前缀的变量（dsh 会因此拒绝启动）",
+      "evidence": "! grep -qE '^[[:space:]]*(export[[:space:]]+)?DSH_' ~/.dsh/.env 2>/dev/null || [ ! -f ~/.dsh/.env ]",
+      "verify": "bash ~/src/dsh-wsl-kit/scripts/check-recovery.sh 2>&1 | grep -q 'no DSH_ names'",
+      "why": "2026-09-28 实际发生过。这行是当时埋的，要到下一次启动才炸。"
+    },
+    {
+      "id": "L0.2",
+      "objective": "dsh 的三个托盘 PS1 能被 PowerShell 解析",
+      "evidence": "powershell.exe -NoProfile -File 'C:\\\\Users\\\\rchua\\\\syntax-check.ps1' 2>&1 | grep -q '0 个文件有问题\\|files with problems: 0'",
+      "verify": "powershell.exe -NoProfile -File 'C:\\\\Users\\\\rchua\\\\syntax-check.ps1' 2>&1 | grep -c '^OK'",
+      "why": "缺 BOM 时 GBK 错位会吃掉引号，而报错指向的那一行其实是对的。"
+    },
+    {
+      "id": "L0.3",
+      "objective": "桌面快捷方式指向的路径 Windows 能解析",
+      "evidence": "powershell.exe -NoProfile -Command \"(New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'DSH WSL.lnk').Trim()).Arguments\" 2>/dev/null | grep -q Ubuntu-24.04",
+      "verify": "powershell.exe -NoProfile -Command \"(New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'DSH WSL.lnk')).Arguments\" 2>/dev/null",
+      "why": "曾经写成 \\\\\\\\wsl.localhost\\\\WSL\\\\... —— 那个 host 不存在，双击完全没反应。"
+    },
+    {
+      "id": "L0.4",
+      "objective": "重启脚本能恢复 Windows interop 的 PATH（clip.exe / powershell.exe）",
+      "evidence": "grep -q '/mnt/c/WINDOWS/system32' ~/src/dsh-wsl-kit/scripts/restart-dsh-web.sh",
+      "verify": "grep -c 'mnt/c' ~/src/dsh-wsl-kit/scripts/restart-dsh-web.sh",
+      "why": "detached 重启继承 systemd 的精简环境，会丢掉整个 Windows PATH。"
+    },
+    {
+      "id": "L0.5",
+      "objective": "重启脚本的 pkill 只杀自己那个端口",
+      "evidence": "grep -E '^[[:space:]]*pkill -f .*dsh web' ~/src/dsh-wsl-kit/scripts/restart-dsh-web.sh | grep -q 'DSH_WEB_PORT'",
+      "verify": "bash ~/src/dsh-wsl-kit/scripts/check-recovery.sh 2>&1 | grep -q 'kills only its own port'",
+      "why": "不按端口限定会杀掉演练实例或线上实例。而 pkill -f 的模式还会匹配到执行它的那个 shell。"
+    },
+    {
+      "id": "L0.6",
+      "objective": "备份存在，而且至少有一个被验证过能还原",
+      "evidence": "ls -d ~/.dsh/vecmem/store.broken-*.json ~/.dsh/vecmem/*.bak-*.json ~/.dsh/cred-backup-* 2>/dev/null | head -1",
+      "verify": "echo 'NOT IMPLEMENTED: 恢复演练是单机最值钱的实践，至今没做过一次'",
+      "why": "备份存在不等于能还原。这一条现在【故意】是未完成状态，因为它是真的没做。"
+    }
+  ]
+}

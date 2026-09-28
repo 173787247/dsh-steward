@@ -1,0 +1,28 @@
+{
+  "layer": "L1",
+  "name": "一致",
+  "note": "数据、记忆、索引之间的自洽。不涉及对不对，只涉及彼此说不说得通。",
+  "goals": [
+    {
+      "id": "L1.1",
+      "objective": "vecmem 的 items 数与 vectors.f32 的字节数一致",
+      "evidence": "node -e \"const fs=require('fs');const j=JSON.parse(fs.readFileSync(process.env.HOME+'/.dsh/vecmem/store.json','utf8'));const v=fs.statSync(process.env.HOME+'/.dsh/vecmem/store.vectors.f32').size;process.exit(j.items.length*j.dims*4===v?0:1)\"",
+      "verify": "node -e \"const fs=require('fs');const j=JSON.parse(fs.readFileSync(process.env.HOME+'/.dsh/vecmem/store.json','utf8'));const v=fs.statSync(process.env.HOME+'/.dsh/vecmem/store.vectors.f32').size;console.log(j.items.length+' x '+j.dims+' x 4 = '+(j.items.length*j.dims*4)+' vs '+v)\"",
+      "why": "2026-09-28 实际坏过：索引脚本用旧格式覆盖元数据，dims 丢失，检索返回零条并报告成功。"
+    },
+    {
+      "id": "L1.2",
+      "objective": "vecmem 里没有空文本或极短文本的垃圾条目",
+      "evidence": "node -e \"const fs=require('fs');const j=JSON.parse(fs.readFileSync(process.env.HOME+'/.dsh/vecmem/store.json','utf8'));process.exit(j.items.filter(i=>!i.text||i.text.length<10).length===0?0:1)\"",
+      "verify": "node -e \"const fs=require('fs');const j=JSON.parse(fs.readFileSync(process.env.HOME+'/.dsh/vecmem/store.json','utf8'));console.log('空/极短条目: '+j.items.filter(i=>!i.text||i.text.length<10).length)\"",
+      "why": "实测有一条只有 1 个字符。"
+    },
+    {
+      "id": "L1.3",
+      "objective": "同一批数据的口径在所有派生产物里一致（不允许出现四个不同的数字）",
+      "evidence": "echo 'NO CHECK YET: 需要在多个产物之间比对计数'",
+      "verify": "echo 'NOT IMPLEMENTED'",
+      "why": "2026-09-28 发现同一批数据在四处有四个数字，没有一处记录为什么变了。"
+    }
+  ]
+}

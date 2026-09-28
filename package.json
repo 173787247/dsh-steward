@@ -1,0 +1,43 @@
+{
+  "name": "dsh-steward",
+  "version": "0.1.0",
+  "description": "Self-evolution supervision for DeepSeek Harness: a layered goal queue, and a controller that pushes a worker forward instead of letting it idle",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "steward": "./steward.mjs",
+    "nudge": "./nudge.mjs"
+  },
+  "files": [
+    "steward.mjs",
+    "nudge.mjs",
+    "goals/",
+    "docs/",
+    "README.md",
+    "README.zh.md",
+    "CREDITS.zh.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "check": "node --check steward.mjs && node --check nudge.mjs",
+    "test": "node steward.mjs --selftest && node nudge.mjs --selftest",
+    "start": "node steward.mjs"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "self-evolution",
+    "self-healing",
+    "observability",
+    "reliability",
+    "goal-queue",
+    "systemd",
+    "wsl"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/173787247/dsh-steward.git"
+  }
+}

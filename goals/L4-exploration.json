@@ -1,0 +1,21 @@
+{
+  "layer": "L4",
+  "name": "探索",
+  "note": "没有明确产出目标的事。这一层永远不该空 —— 它是没事干时的燃料。",
+  "goals": [
+    {
+      "id": "L4.2",
+      "objective": "对照实验：分层压缩记忆 vs vecmem 的 Embedding 检索",
+      "evidence": "echo '这是唯一能把两套记忆放在同一把尺子上的实验'",
+      "verify": "ls ~/src/dsh-steward/docs/MEMORY-COMPARISON.zh.md 2>/dev/null || echo 'NOT DESIGNED'",
+      "why": "把整篇文档灌进向量库，和写少量高密度条目，哪个检索得准 —— 值得用同一批问题量一次。"
+    },
+    {
+      "id": "L4.3",
+      "objective": "世界模型的通道设计：多时点快照差分 / 会议录音与 POI 对照 / (未来) 眼镜",
+      "evidence": "test -f ~/src/dsh-steward/artifacts/poi_drift.json",
+      "verify": "ls -la ~/src/dsh-steward/artifacts/poi_drift.json 2>/dev/null || echo \"NOT COMPUTED\"",
+      "why": "用户 2026-09-28 夜：你越懂我，我就能把物理世界给到你，然后整合世界模型。现有条件下的第一步是用多个备份时点算 POI 漂移，产出写进本仓的 artifacts/。"
+    }
+  ]
+}
