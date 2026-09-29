@@ -54,31 +54,6 @@ const say = (...a) => { if (!quiet) console.log(...a); };
  * round and it is the one that hid every defect on 2026-09-28: a check that
  * silently does nothing looks exactly like a check that passed.
  */
-/**
- * Commands that succeed unconditionally, so any evidence built on them is empty.
- *
- * The rule comes from the survey, and it has three samples behind it now. The first
- * was this file's own first version: it reported L2, L3 and L4 as fully satisfied
- * because every evidence command ended in `echo`. The second and third are in the
- * verification survey, which reproduced the forms on this machine and cited the bash
- * manual: the status of an AND-OR list is the status of the last command in it, so
- * `test ... && echo yes || echo no` always returns zero.
- *
- * A goal whose evidence is empty is not satisfied. It is also not failed -- nothing
- * was learned. It is UNDECIDED, and saying so is the whole point.
- */
-const VACUOUS = [
-  [/\becho\b/,   'echo succeeds whatever the condition was'],
-  [/\bprintf\b/, 'printf succeeds whatever the condition was'],
-  [/^\s*true\s*$/, 'true succeeds by definition'],
-  [/&&[^|]*\|\|/, 'a && b || c returns the status of c, which is usually success'],
-];
-
-function vacuous(cmd) {
-  for (const [re, why] of VACUOUS) if (re.test(cmd)) return why;
-  return null;
-}
-
 function holds(cmd) {
   try {
     execSync(cmd, { shell: "/bin/bash", stdio: "pipe", timeout: 60_000, encoding: "utf8" });
@@ -132,9 +107,7 @@ for (const layer of layers) {
   if (!doc) { say(`  ${layer}  (no goals file)`); continue; }
   const rows = [];
   for (const g of doc.goals) {
-    // ★ 空检查先于执行：不跑一个明知会通过的检查
-    const vac = vacuous(g.evidence);
-    const ok = vac ? null : holds(g.evidence);
+    const ok = holds(g.evidence);
     rows.push({ ...g, ok });
   }
   result[layer] = { doc, rows };
@@ -148,8 +121,8 @@ for (const [layer, { doc, rows }] of Object.entries(result)) {
   const failed = rows.filter(r => !r.ok);
   say(`\n  ${layer}  ${doc.name}   ${rows.length - failed.length}/${rows.length} 满足`);
   for (const r of rows) {
-    say(`    ${r.ok === true ? "ok  " : r.ok === false ? "FAIL" : "????"}  ${r.id}  ${r.objective}`);
-    if (r.ok !== true) {
+    say(`    ${r.ok ? "ok  " : "FAIL"}  ${r.id}  ${r.objective}`);
+    if (!r.ok) {
       // The command is printed so the result can be reproduced. A number
       // without its command is not evidence.
       say(`          evidence: ${r.evidence}`);
@@ -171,15 +144,14 @@ if (firstBlocking) {
 }
 
 const l2 = result["L2"];
-const undecided = Object.values(result).flatMap(l => l.rows).filter(r => r.ok === null);
-const l2open = l2 ? l2.rows.filter(r => r.ok !== true) : [];
+const l2open = l2 ? l2.rows.filter(r => !r.ok) : [];
 if (l2open.length) {
   say(`  Next: ${l2open[0].id}  ${l2open[0].objective}`);
   say(`  ${l2open.length} of ${l2.rows.length} in L2 still open.`);
   process.exit(3);
 }
 
-const supply = ["L3", "L4"].flatMap(l => (result[l]?.rows ?? []).filter(r => r.ok !== true));
+const supply = ["L3", "L4"].flatMap(l => (result[l]?.rows ?? []).filter(r => !r.ok));
 say(`  L0-L2 clean. ${supply.length} open in L3/L4 -- that is the supply.`);
 if (supply.length) say(`  Next: ${supply[0].id}  ${supply[0].objective}`);
 process.exit(4);

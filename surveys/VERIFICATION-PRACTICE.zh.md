@@ -1153,15 +1153,68 @@ URL：<https://sre.google/sre-book/testing-reliability/>
 
 **对本仓的含义**：`check-recovery.sh` 在真实环境里跑、而探针在别处跑，这**不是重复**——它们是两个不同的检查。反过来，**不能把"探针在 staging 通过"当成"生产路径通过"的证据**。
 
-### 6.3 边界还要更硬：一个进程无法监督自己的缺席
+### 6.3 一条更硬的边界：测试只能证明"有"，不能证明"没有"
 
-> 待补完：Dijkstra 的"测试只能证明缺陷存在、不能证明不存在"原文；测试 oracle 问题
-> （Barr et al. 2015 的调查）；runtime verification 的形式化表述（只能对**这一条**
-> trace 说"没违反"，不能证明不存在违反）。
+**[文档]** Dijkstra 在 1972 年图灵奖演讲里给出的那句，是本题目所有边界论证的祖先：
 
-**[本仓]** 本仓 README.zh.md §3 已经写下这条的工程形式：
+> "Today a usual technique is to make a program and then to test it. But:
+> **program testing can be a very effective way to show the presence of bugs, but is
+> hopelessly inadequate for showing their absence.**"
 
-> "第 1、2、7、8、10 步必须在 dsh 之外跑。[...] 而**一个进程无法监督自己的缺席**。"
+URL：<https://www.cs.utexas.edu/~EWD/transcriptions/EWD03xx/EWD340.html>
+
+**把这条翻译成本仓的语言**：
+
+> 一个检查**通过**了，它证明的是"这次输入下它没叫"。
+> 它**不**证明"它所声称的那件事成立"。
+
+这与 §5 的失败模式是同一件事的两面：**"没叫"是唯一的输出，而"没叫"的成因有很多种**
+（真的没问题 / 检查是空的 / 检查没跑 / 检查跑了但结果没人读 / 检查读错了输入）。
+**这五种成因，检查本身区分不出来。**
+
+### 6.4 一台机器上的"健康检查"在定义上测不出来的五件事
+
+把本报告和本仓的材料合起来，得到这份清单。**它不是"要改进的地方"，是"不要指望它"的地方。**
+
+| # | 测不出来的东西 | 为什么在定义上测不出来 | 依据 |
+|---|---|---|---|
+| 1 | **下次重启会不会成功** | 取决于尚未跑过的代码路径；SRE 说这要求"站点完全不变"或"你能描述全部改动" | SRE ch17（§6.1） |
+| 2 | **一条检查自己是不是空的** | "没叫"与"空了"在输出上无法区分；必须拿**已知坏输入**去证伪 | SRE ch17 "Known bad requests should error"（§5.3）；本仓约束 4.1 |
+| 3 | **检查自己有没有在跑** | 一个没跑的检查和一个通过的检查，产出的东西一样（都是"没有失败"）；这需要**在检查之外**的心跳 | SRE ch26（§4.1，心跳那条）；Prometheus `absent()`（下节） |
+| 4 | **两条线共同的错误前提** | 差分只能看见"两条线之间的差"；两边都错时差是零 | MCO 案例（§5.4 案例 5） |
+| 5 | **一个还没被想到的失败模式** | 演练和检查覆盖的都是"你想得到的失败" | Meta storm drills（§5.4 案例 6） |
+
+### 6.5 机制层：怎么在工程上"检测缺席"
+
+第 3 条不是没有办法。**做法是：不去检查"那个东西坏了没有"，而是检查"那个东西的汇报还在不在"。**
+
+**[文档]** Prometheus 为此提供了一个专门的函数：
+
+> "`absent(v instant-vector)` returns an empty vector if the vector passed to it has
+> any elements (float samples or histogram samples) and a 1-element vector with the
+> value 1 if the vector passed to it has no elements.
+> **This is useful for alerting on when no time series exist for a given metric name
+> and label combination.**"
+
+URL：<https://prometheus.io/docs/prometheus/latest/querying/functions/>
+
+**[文档]** 同一条思路在 SRE Book ch26 里的措辞（§4.1 已引）：
+
+> "Set up alerts that fire when a recovery process fails to provide a **heartbeat
+> indication of its success**"
+
+**对本仓的直接映射**：
+
+- `check-recovery.sh` 的 9 项检查 → 每一项都应该**写一行带时间戳的记录**（journal 或文件）。
+- 另有一条**不属于那 9 项**的检查，只判断"上一次记录是不是太久以前"。
+- 这条检查自己也要写记录——**然后到此为止**。递归一层就够；
+  再往上一层只能靠人（或者另一个进程之外的机制，比如 systemd timer 的
+  `OnFailure=` 加上"timer 本身没跑"的检测）。
+
+**这一条正好回答本仓 README.zh.md §10 的开放问题 2**
+（"监督者的重启条件是什么？需要一个量化的检查可信度。现在没有。"）：
+**在"检查可信度"被量化之前，先量化"检查的存活"**——后者是前者前提，
+而且它能用一行 journal 时间戳做出来。
 
 ---
 
