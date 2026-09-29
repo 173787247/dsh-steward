@@ -2,7 +2,30 @@
 
 > 调研题目：`task-7`。目标：搞清**怎么验证一个会改自己的系统**，以及别人踩过什么坑。
 >
-> **状态：初稿落盘（防止再被中断），正在逐节补完。补完前不要把本文件的空白处当成"没有先例"。**
+> **状态：已完成。** 五问全部作答。**没有依据的地方不写**，改记在 §9（共 8 条）。
+>
+> 写于 2026-09-29。中途因 dsh 重启被中断一次，此后改为**每读到一个来源就先落盘**。
+
+---
+
+## 三条最关键的
+
+如果只读三句话：
+
+1. **"检查通过了"不是证据，除非这个检查曾经失败过。**
+   Google SRE 第 17 章的题词是 *"If you haven't tried it, assume it's broken."*，
+   同一章把"已知坏输入必须报错"写成了常规做法（§5.3）。
+   本仓第一约束的上游出处就在这里。
+
+2. **最强的事故案例是 GitLab 2017：四条恢复路径全部不可用，而每条都"在跑"。**
+   pg_dump 每天失败，失败邮件被 DMARC 丢掉 —— *"we were never aware of the backups
+   failing, until it was too late."*（§5.4 案例 1）
+   它证明了：**检查、报警、通知是三个独立的可能失效点，而人们只检查第一个。**
+
+3. **本仓风险最高的一步不是 APPLY，是 BASELINE → RE-VERIFY 这个形状本身。**
+   在一台机器上按时间分段做前后对比，正是 Google SRE Workbook 专门用一节警告的
+   *"Before/After Evaluation Is Risky"*（§2.3）。单机绕不开它，
+   但可以把它**标注**出来，而不是把它当成等价于 A/B 的证据。
 
 ---
 
@@ -23,6 +46,34 @@
 1. 每条带 URL。
 2. 找不到依据的，进 §9「没找到答案的问题」，**不用"大概""应该是"填补**。
 3. 引文一律原文照抄（英文原文 + 中文说明），不做无引号的转述。
+
+### 0.3 本报告对自己做的事：引文核对
+
+按第一约束，一份"每条都带引文"的报告，本身就是一个**没被证伪过的检查**——
+除非有人拿着原文逐条核对过。所以写完初稿之后跑了一遍自动核对：
+
+- 把本文件里所有 `>` 引文块抽出来（**109 条**英文引文片段），
+- 把 24 个外部来源重新抓下来（含本地 PDF 抽取的正文）建成语料，
+- 逐条做空白/引号/连字符无关的匹配。
+
+**结果：80 条自动命中，29 条未命中。** 逐条查过未命中的原因：
+
+| 未命中的原因 | 条数 | 处理 |
+|---|---|---|
+| 引文来自**本机源码**（`/home/rchua/src/...`），不在语料里 | 9 | 这些是我直接 `read` 的，已在附录 A 登记 |
+| 引文来自**双栏 OCR 的 PDF**，栏内换行把词切开了 | 8 | 逐片段核对通过（见上方的 OCR 说明）；`grep -F` 每片都命中 |
+| 引文来自**网页里由 JS 渲染的部分**，重抓拿不到正文 | 5 | 用首次 `web_fetch` 的原文核对（那些页面当时返回了完整正文） |
+| 引文是**网页摘要**而不是 PDF 正文（Google 变异论文的摘要） | 4 | 在 PDF 正文里逐关键词命中（`infeasably expensive` / `arid lines` 等） |
+| 引文被我从**列表改写成了连续文本** | 3 | 逐项核对原文，含义未变 |
+
+**这次核对抓到了一个真实的错误**：我在 §2.3 的一次编辑中，把 Google SRE Workbook 的
+原话 "We strongly **advise** running only one canary deployment at a time" 写成了
+"We strongly **recommend**"。**这是一个只差一个词的引用失真**，靠人眼是看不出来的，
+是上面这个脚本把它逼出来的。已改正。
+
+**这就是本报告主张的那件事的最小演示**：一个检查，只有在它**抓到过一个真错误**之后，
+才配被信任。上面这个脚本抓到过一次，所以它现在是这个仓里少数**被证伪过**的检查之一。
+（它还被第二次证伪过——见附录 E 的注入变异体实验。）
 
 ---
 
@@ -234,6 +285,52 @@ URL：<https://sre.google/workbook/canarying-releases/>
 
 - **指标窗口必须 ≤ 观察窗口**："When using metrics to evaluate canary success, make sure the intervals of your metrics are either the same as or less than your canary duration." 否则会拿一个"按小时聚合"的数字去评价一次 30 分钟的改动。
 - **一次只跑一个 canary**："Running simultaneous canaries also increases the risk of signal contamination if the canaries overlap. We strongly advise running only one canary deployment at a time." —— 对一台机器上的自改系统，等价规则是：**一次只让一个改动处于"已应用但未判定"的状态**。
+
+### 2.4 这个做法有名字，而且有名字带来的好处：**不需要 oracle**
+
+本仓的 `run.mjs` 和 Google 的 canary 是同一个东西的两个应用场景。
+它在测试学里的通用名字是 **differential testing（差分测试）**。
+**[文档]** Yang, Chen, Eide, Regehr, *Finding and Understanding Bugs in C Compilers*（PLDI 2011，
+即 Csmith 那篇）对它的定义，比上面两处都干净：
+
+> "Randomized **differential testing** has the advantage that **no oracle for test results is
+> needed.** It exploits the idea that if one has multiple, deterministic implementations
+> of the same specification, all implementations must produce the same result from the
+> same valid input. **When two implementations produce different outputs, one of them
+> must be faulty.** Given three or more implementations, a tester can use voting to
+> heuristically determine which implementations are wrong."
+
+URL：<https://www.cs.utah.edu/~regehr/papers/pldi11-preprint.pdf>
+
+**"不需要 oracle"是差分测试真正的价值，也是它与"写一个断言"的根本区别。**
+本仓的困境正是"我不知道 dsh 重启之后应该是什么样"——差分测试绕开了这个问题：
+**我不需要知道哪边对，我只需要知道两边不一样。**
+（这也解释了 `run.mjs` 那句注释为什么必须存在：*发散不自动等于失败的那条线有 bug*。）
+
+**同一篇论文也写下了它的固有极限**，这句话应当贴在 `run.mjs` 的文件头：
+
+> "under test would produce the same incorrect output for a test case. Of course, if
+> that did happen **we would not detect that problem**; this is **an inherent limitation
+> of differential testing without an oracle**."
+
+**即：两条线**一起错**的时候，差分测试是瞎的。** 这正是 MCO 案例（§5.4 案例 5）
+和 §6.4 第 4 条说的同一件事，而且这里是它最简洁的表述。
+
+**同一篇论文里还有一个必须一起读的转折**（它让 §9.1 的结论更精确）：
+
+> "In summary, despite the fact that **Knight and Leveson [13] found a substantial
+> number of correlated errors** in an experiment on N-version programming, Csmith has
+> yielded **no evidence of correlated failures among unrelated C compilers.**"
+
+**两句话合起来才是完整的结论**：
+"独立实现之间会不会共错"，**取决于它们有多独立**。
+- 27 个学生**按同一份规格**各自实现同一个算法 → 显著共错（§9.1）。
+- GCC / LLVM / CompCert 这些**血缘、目标、实现策略都不同**的编译器 → 未发现共错。
+
+**对 dsh-steward 的操作含义**：PROPOSER 和 VERIFIER 如果都是同一个模型、
+读同一份 README、用同一套工具，那它们更像前者；要让相关性降下来，
+必须让两条线**在方法上不同**（不同的观测手段、不同的输入构造方式），
+而不只是**换成另一个 agent**。
 
 ---
 
@@ -466,7 +563,7 @@ Gmail 2011 那次真实还原之所以能在数小时内给出预估：
 **DiRT 不是 CI**——它是**年度**的、有人参加的演练。这是本问的一个关键区分：
 **"自动化成 CI 的一部分"和"定期真人演练一次"是两种不同的东西，公开材料里前者远少于后者。**
 
-### 4.2 有没有人真的把"还原一次"放进自动化流水线
+### 4.3 有没有人真的把"还原一次"放进自动化流水线
 
 **有，而且不止一个。但先说结论的形状：**
 
@@ -575,7 +672,7 @@ URL：<https://pgbackrest.org/command.html>
 
 #### 组织级演练：Google 与 Meta [文档]
 
-- Google **DiRT**：年度演练，见 §4.1。Gmail 2011 能从磁带恢复，靠的是
+- Google **DiRT**：年度演练，见 §4.2。Gmail 2011 能从磁带恢复，靠的是
   "previously simulated many times"；Google Music 2012 能用上那个新工具，
   靠的是"weeks after the company's annual disaster recovery testing exercise"。
 - Meta **storm drills**：见 §5.4 案例 6。长期在跑，但没覆盖"骨干网整体消失"。
@@ -623,6 +720,12 @@ test -w file && echo writable || echo readonly
 ```
 
 `echo` **永远成功**。无论 `test -w` 真假，这一行都打印一行字、退出码 0。检查把"我印了一行状态"当成了"我验证了这个状态"。
+
+> **[源码] 后续确认**：这条我后来在 `steward.mjs` 自己的注释里读到了第一手记录
+> （§8.1）："The first was this file's own first version: it reported L2, L3 and L4 as
+> fully satisfied because every evidence command ended in `echo`."
+> **所以这条已经从"转述"升级为"源码里写着的"**，并且它现在已经有一道机器检查
+> （`VACUOUS` 列表）挡着。**这是本报告里唯一一条"已经闭环"的失败模式。**
 
 **② 删一节删掉六节。**
 用正则删 README 里的一节，正则同时匹配到了后面五节的开头，**六节一起被删掉，而当时的检查没有发现**——直到人问"是不是四不像了"。
@@ -968,9 +1071,13 @@ URL：<https://www.sec.gov/litigation/admin/2013/34-70694.pdf>
 
 > "It is clear from the AECL documentation on the modifications that the software
 > allows concurrent access to shared memory, that there is no real synchronization
-> aside from data stored in shared variables, and that the 'test' and 'set' for such
+> aside from data stored in shared variables, and that the "test" and "set" for such
 > variables are **not indivisible operations**. **Race conditions resulting from this
 > implementation of multitasking played an important part in the accidents.**"
+
+> ⚠️ **OCR 说明**：上述 Therac-25 引文来自双栏排版的 OCR，原文在栏内换行处有连字符
+> （`safe-ty`、`Race con-ditions`）。我按语义把断行接回，未改动任何词。
+> 引文里的 `"test"` / `"set"` 在原文是弯引号（`“test”` / `“set”`）。
 
 **两条可迁移的规则**：
 
@@ -1232,29 +1339,409 @@ URL：<https://prometheus.io/docs/prometheus/latest/querying/functions/>
 
 这条被并入本报告第 5 问的理由：**它和 `echo` 那条是同一个失败形状。** 一个 agent 抓网页，等于把一个不可信输入接进了**自己的指令通道**。检查"网页内容有没有被当指令执行"，和检查"`test -w` 的结果有没有被真的读"是同一类问题：**你以为你在读一个值，其实那条路径上有一件事无条件成功了。**
 
-> 待补完：prompt injection 的防御设计。已确认要覆盖并且要引原文的：
-> - OWASP LLM Top 10 的 LLM01（Prompt Injection）对"指令与数据不可分离"的表述；
-> - Simon Willison 的 "lethal trifecta"（私有数据 + 不可信内容 + 对外通信）及其"dual LLM pattern"；
-> - Google DeepMind 的 CaMeL（用控制流/能力标记把"数据"与"指令"在架构上分开，而不是靠提示）；
-> - Microsoft 的 Spotlighting（把不可信内容标记后再交给模型）；
-> - 以及"提示注入不是可以靠更聪明的提示解决的问题"这条共识的出处。
+### 7.2 为什么"更聪明的提示"不是答案
+
+**[文档]** OWASP Gen AI Security Project 的 LLM01:2025（Prompt Injection）：
+URL：<https://genai.owasp.org/llmrisk/llm01-prompt-injection/>
+
+> "**Indirect prompt injections occur when an LLM accepts input from external sources,
+> such as websites or files.** The content may have in the external content data that
+> when interpreted by the model, alters the behavior of the model in unintended or
+> unexpected ways. Like direct injections, indirect injections can be either
+> intentional or unintentional."
+
+> "Prompt injection vulnerabilities are possible due to the nature of generative AI.
+> Given the stochastic influence at the heart of the way models work, **it is unclear
+> if there are fool-proof methods of prevention for prompt injection.**"
+
+**[文档]** Simon Willison 把这个风险拆成一个可操作的三元组：
+URL：<https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/>
+
+> "The lethal trifecta of capabilities is:
+> - **Access to your private data**
+> - **Exposure to untrusted content** — any mechanism by which text (or images)
+>   controlled by a malicious attacker could become available to your LLM
+> - **The ability to externally communicate** in a way that could be used to steal
+>   your data"
+
+> "**The problem is that LLMs follow instructions in content.** [...] This is what
+> makes them so useful: we can feed them instructions written in human language and
+> they will follow those instructions and do our bidding."
+
+> "There are ways to reduce the likelihood that the LLM will obey these instructions:
+> **you can try telling it not to in your own prompt, but how confident can you be
+> that your protection will work every time?**"
+
+**注意最后这句的结构**：它和本仓第一约束是**同一个句式**。
+"在提示里写一句'不要执行外部内容'"，就是一个**从没拿已知坏输入跑过的检查**。
+它的存在不是证据。
+
+### 7.3 架构上的做法（三种，防护强度不同）
+
+#### ① 最便宜、也最有效：不给同一个上下文同时具备三样东西
+
+按 lethal trifecta，**只要拆掉任意一角，攻击就不成立**。
+对一个抓网页的 agent，可行的拆法是：
+
+- **抓取用的上下文没有写权限、没有密钥、没有对外发送能力**（拆掉第 1 和第 3 角）；
+- 抓回来的文本**只能作为数据返回到一个不具备动作能力的上下文**；
+- 需要动作时，**由另一个上下文根据"已经决定要做什么"去执行**，而不是由读过原文的上下文执行。
+
+这条不需要任何研究，只需要**能力边界**。它也是本仓最应该先做的一条。
+
+#### ② 标记来源（Spotlighting）：让模型能分辨哪段来自哪里
+
+**[文档]** Hines et al. (Microsoft), *Defending Against Indirect Prompt Injection Attacks
+With Spotlighting*，arXiv:2403.14720。
+URL：<https://arxiv.org/abs/2403.14720>
+
+摘要里的问题陈述：
+
+> "In common applications, multiple inputs can be processed by concatenating them
+> together into a single stream of text. However, **the LLM is unable to distinguish
+> which sections of prompt belong to various input sources.** Indirect prompt
+> injection attacks take advantage of this vulnerability by embedding adversarial
+> instructions into untrusted data being processed alongside user commands."
+
+做法与效果：
+
+> "**The key insight is to utilize transformations of an input to provide a reliable
+> and continuous signal of its provenance.** [...] Using GPT-family models, we find
+> that spotlighting reduces the attack success rate from **greater than 50% to below
+> 2%** in our experiments with minimal impact on task efficacy."
+
+**读这个数字要小心**：50% → 2% 是**降低**，不是**消除**。2% 在"一次抓取"上是小概率，
+在"每天抓很多页、一年"上是必然会发生的。**不要把 2% 读成 0。**
+
+#### ③ 控制流与数据流分离（CaMeL）：把"不可信数据能影响什么"从提示里拿走
+
+**[文档]** Debenedetti et al. (Google DeepMind), *Defeating Prompt Injections by Design*，
+arXiv:2503.18813。
+URL：<https://arxiv.org/abs/2503.18813>
+
+> "we propose CaMeL, a robust defense that **creates a protective system layer around
+> the LLM**, securing it even when underlying models are susceptible to attacks. To
+> operate, CaMeL **explicitly extracts the control and data flows from the (trusted)
+> query; therefore, the untrusted data retrieved by the LLM can never impact the
+> program flow.** To further improve security, CaMeL uses a notion of a **capability**
+> to prevent the exfiltration of private data over unauthorized data flows by
+> enforcing security policies when tools are called."
+
+代价（摘要里明确给了）：
+
+> "We demonstrate effectiveness of CaMeL by solving **77%** of tasks with provable
+> security (compared to **84%** with an undefended system) in AgentDojo."
+
+**这是本题目最值得抄的一条架构结论**：
+
+> **要"保证"外部内容不被当指令执行，就不该让外部内容有机会影响"程序接下来做什么"。
+> 这件事做不到靠模型自觉，只能靠在模型外面加一层：控制流来自可信查询，
+> 数据流可以来自任何地方，两者在结构上不交叉；工具调用受 capability 约束。**
+
+7 个百分点的任务成功率，换"可证明的安全性"——**这是一笔明码标价的交易，
+不是一句"我们会小心"**。
+
+### 7.4 落回本仓：三条可执行的规则
+
+1. **能力分离**（对应 7.3 ①）：`web_fetch` / `obscura_fetch` 这类读外部内容的动作，
+   **不应与写文件、改配置、执行命令的能力出现在同一个 subagent 上下文里**。
+   本仓现在的风险点是：同一个 agent 既抓网页又改 `~/.dsh/` 下的文件。
+2. **来源标记**（对应 7.3 ②）：外部内容进入上下文时，显式打标（来源 URL + 抓取时间 +
+   "以下是数据"），并且在**下游的任何决策点上**，这个标记不能丢。
+   这要求"标记随数据流动"——也就是 taint tracking 的简化版。
+3. **逆向测试**（对应 OWASP 的 mitigation 7）：OWASP 的原话是——
+
+   > "**Conduct adversarial testing and attack simulations**: Perform regular
+   > penetration testing and breach simulations, **treating the model as an untrusted
+   > user** to test the effectiveness of trust boundaries and access controls."
+
+   这**正是本仓 README.zh.md §5 里那个还没有人的 ADVERSARY 角色**。
+   第五路抓到的那段注入文本，就是一次**免费的真实测试向量**——
+   它应该被写进一个固定的测试用例里（"把这个页面喂进去，检查 agent 有没有照做"），
+   而不是只记在附录 C 里。
+
+### 7.5 与第 5 问的关系（为什么这条放在失败模式里）
+
+把这三件事放在一起看：
+
+| 事故 | 共享的形状 |
+|---|---|
+| `test -w f && echo writable \|\| echo readonly` 永远返回 0 | 你以为你在读一个值，其实那条路径上有一件事**无条件成功了** |
+| `grep -q` 在文件不存在时返回 2，被 `if` 吃成"没匹配到" | 你以为你在读一个值，其实你读到的是**另一种情况的默认值** |
+| GitLab 的 cron 报警邮件被 DMARC 丢掉 | 信号产生了，**没有人/机器收到它** |
+| 网页正文里的注入指令 | 你以为你在读数据，**数据的位置上放着一条指令** |
+
+**四条是同一个问题的四个版本：输入的来源与语义，在结构上没有被区分开。**
+前两条是 shell 的默认行为造成的，第三条是邮件基础设施造成的，
+第四条是 LLM 的架构性质造成的。**修法也一样：不要靠"读的人小心"，
+要靠"结构上不可能混淆"。**
 
 ---
 
-## 8. 与本仓现有机制对照
+## 8. 与本仓现有机制对照（全部 [源码]，2026-09-29 读）
 
-> 待补完。计划对照：六个不变量 + `run.mjs`、`check-recovery.sh`、`steward.mjs --selftest`、
-> `nudge.mjs --selftest`。**这一步要读源码，不能靠转述。**
+### 8.1 `steward.mjs` —— 第一约束已经有一半被机器化了
+
+**[源码]** `steward.mjs`（185 行）里有一个 `VACUOUS` 列表，把 §5.2 的那几种形态
+**从"纪律"变成了"代码"**：
+
+```js
+const VACUOUS = [
+  [/\becho\b/,   'echo succeeds whatever the condition was'],
+  [/\bprintf\b/, 'printf succeeds whatever the condition was'],
+  [/^\s*true\s*$/, 'true succeeds by definition'],
+  [/&&[^|]*\|\|/, 'a && b || c returns the status of c, which is usually success'],
+];
+```
+
+它的注释**已经引用了本调研**（这是本报告第一次被自己的对象引用，说明这条闭环了）：
+
+> "The rule comes from the survey, and it has three samples behind it now. The first
+> was this file's own first version: it reported L2, L3 and L4 as fully satisfied
+> because every evidence command ended in `echo`. The second and third are in the
+> verification survey, which reproduced the forms on this machine and cited the bash
+> manual [...]"
+
+> "A goal whose evidence is empty is not satisfied. **It is also not failed -- nothing
+> was learned. It is UNDECIDED, and saying so is the whole point.**"
+
+**这解决了 §5.2 自查表里能机械化的那一半。** 剩下的一半（"拿已知坏输入跑一次"）
+只能在**具体某条检查**上做，因为"什么算坏输入"取决于那条检查在测什么。
+
+### 8.2 `steward.mjs --selftest` —— 把"证明能失败"做成了一道闸门
+
+**[源码]** 5 个探针，其中一个正是 §5.2 的⑥：
+
+```js
+const probes = [
+  ["true",  true,  "a command that succeeds must read as satisfied"],
+  ["false", false, "a command that fails must read as not satisfied"],
+  ["exit 7", false, "a non-zero exit must read as not satisfied"],
+  ["nonexistent-command-xyz", false, "a command that cannot run must read as not satisfied"],
+  ["grep -q zzz /etc/hostname", false, "a grep that finds nothing must read as not satisfied"],
+];
+```
+
+**最重要的不是探针本身，是探针失败时的行为：**
+
+```js
+if (bad) { console.log("  The runner cannot tell pass from fail. Refusing to report."); process.exit(9); }
+```
+
+以及文件头的理由：
+
+> "A check that has not been shown to fail is not a check. Two probes, both of which
+> must return the expected verdict, **or the runner refuses to report at all --
+> because a runner that cannot tell pass from fail is worse than no runner.**"
+
+**这是一个可以直接推广的设计**：自检不是一份报告，**是一道前置闸门**。
+自检不过，就**拒绝产出任何结论**——因为那个结论没有意义。
+本调研的 §3.4 建议把这个模式推广到每一条检查。
+
+### 8.3 `nudge.mjs --selftest` —— 失败方向选对了
+
+**[源码]** 10 个探针。它的设计理由是本报告里最好的一句工程判断：
+
+> "The dangerous failure here is a parser that reads garbage as **'stop'**, because
+> **stop is silence and silence is what a broken parse looks like.** So the parse must
+> return ok:false on anything malformed, and the caller must treat that as an error
+> rather than as a decision."
+
+探针覆盖了：空字符串 → false、纯散文无 JSON → false、`{"continue": true}` 但没有 nudge → false、
+`"continue": "yes"` 类型不对 → false。失败时：
+
+```js
+if (bad) { console.log("  Refusing to run: a parser that reads garbage as a verdict would stop the loop silently."); process.exit(9); }
+```
+
+**这条与本报告 §6.4 第 2 条是同一个思想的对偶**：
+`steward.mjs` 防的是"**空的证据被读成通过**"，
+`nudge.mjs` 防的是"**坏的解析被读成停止**"。
+**两个都选了"不确定时不行动"这个方向**——这与 README.zh.md §4.3
+"监督者先报告，后动手"是同一条原则的两种落地。
+
+### 8.4 `check-recovery.sh` —— 一半做到了，一半只在散文里
+
+**[源码]** `/home/rchua/src/dsh-wsl-kit/scripts/check-recovery.sh`（174 行）。
+它做对的地方：脚本头的注释把**每一条检查对应哪一次真实事故**写下来了：
+
+```
+#   1  ~/.dsh/.env carries a DSH_-prefixed name      dsh refuses to start
+#   2  the launcher scripts do not parse             nothing happens on click
+...
+#   7  the vector store's items and rows disagree    search silently returns 0
+```
+
+```
+# Exit 0 when ready, 1 when not. Prints one line per check so a failure says
+# which precondition broke rather than only that something did.
+```
+
+**这是一个好的检查该有的样子：每一条都能追溯到一次真实故障。**
+但对照本报告，有三个缺口：
+
+| 缺口 | 证据 | 对应章节 |
+|---|---|---|
+| **"每项都被坏输入证伪过"只写在 README 里，脚本里没有** | 脚本里没有任何 selftest / 证伪 / 坏输入用例；`grep -n "selftest\|证伪" check-recovery.sh` 无命中 | §3.4、§5.3 |
+| **项数对不上** | 脚本头列 **7** 类；`ok`/`bad` 调用点 **12** 处；README.zh.md §6 写 **"9 项"** | 本报告 §5.1 形状② |
+| **没有心跳** | 脚本只输出 OK/FAIL，不写带时间戳的记录；没有"上次跑是什么时候"的检查 | §4.1、§6.5 |
+
+**这三条不是批评，是"本仓第一约束恰好在这里没有落地"的位置。**
+README 说 `check-recovery.sh` "9 项，每项都被坏输入证伪过"——
+按 §5.3 的标准，**这句话本身就是一个还没被证伪的断言**，而且它不在代码里，
+所以下一次改动之后没有任何机制能告诉你它还成不成立。
+
+### 8.5 与本仓闭环的逐项对照
+
+| 本仓机制 | 本调研的判定 | 依据 |
+|---|---|---|
+| `run.mjs` 三态（agree / DIVERGE / UNDECIDED） | **对**。未知不算失败，与 §2.1 一致 | [源码] run.mjs 注释 |
+| 不变量断言性质而非修复 | **对**。§1.1 的工业级做法 | [源码] invariants/README.md |
+| `BOTH-FAIL` 单独报 | **对**。第一次跑出三个，全是错断言 | [源码] invariants/README.md |
+| BASELINE → APPLY → RE-VERIFY | **是本报告里风险最高的一处**：单机上按时间分段，正是 SRE Workbook 说的 "Before/After Evaluation Is Risky" | §2.3 |
+| `check-recovery.sh` 的证伪记录 | **只在散文里**，代码里没有 | §8.4 |
+| 检查的存活（心跳） | **没有** | §6.5 |
+| 恢复演练进 CI | **没有**；目前是人工的 `--selftest` | §4.3、§8.2 |
+| 抓外部内容的能力边界 | **没有**：同一个 agent 既能抓网页又能写文件 | §7.4 |
+| ADVERSARY 角色 | **还没有人**（README.zh.md §5 自己写了） | §5.3、§7.4 |
+
+**一句话总结这张表**：本仓在"**读结果**"这一侧已经做得比多数开源项目好
+（三态、性质断言、自检闸门、拒绝报告）；缺的全部在
+"**让检查自己被动摇**"这一侧——证伪、心跳、演练、对手、能力边界。
 
 ---
 
-## 9. 没找到答案的问题
+## 9. 没找到答案的问题（**不许用"大概""应该是"填**）
 
-> 待补完。已知候选：
-> 1. 公开材料里，把 **restore 真正放进 CI 流水线**的项目，比"定期人工演练"少得多——待核。
-> 2. "独立验证者"这个保证有多强？N-version programming 的经典实证结论（Knight & Leveson 1986，
->    独立开发的程序在**同一批输入**上失败）直接质疑"写改动的人和验改动的人不共享盲区"这个假设。待核原文。
-> 3. 单机、每天只有几次动作的样本量下，"连续 N 次失败即停止自动化"是否有先例。待核。
+### 9.1 ★ "独立验证者"这个保证有多强？——文献说：比它听起来弱
+
+本仓 README.zh.md §5 的立论是：
+
+> "写改动的人和验改动的人，**不该共享同一个盲区**"
+
+这个方向是对的，但有一条 1986 年的经典实验结果**直接限制了它的强度**。
+
+**[文档]** Knight & Leveson, *An Experimental Evaluation of the Assumption of Independence
+in Multiversion Programming*, IEEE TSE 12(1):96–109, 1986。
+**我读的不是 IEEE 原刊，是 KTH 课程站点上的一份 3 页摘要**（`pdftotext` 抽取）：
+URL：<https://www.csc.kth.se/utbildning/kth/kurser/DA2210/vettig12/Seminarier/KnightLeveson.pdf>
+
+实验设计（摘要原文）：
+
+> "In all, **27 versions** of a program were prepared **independently** from the same
+> specification **at two universities** and then subjected to **one million tests**."
+
+结果：
+
+> "The results of the tests revealed that the programs were individually extremely
+> reliable but that **the number of tests in which more than one program failed was
+> substantially more than expected.**"
+
+具体数字：
+
+> "Of the 27 programs, 6 reported no failure whatsoever; 21 were successful for more
+> than 99% of the test cases; 23 out of the 27 programs were successful for more than
+> 99.9% of the test cases."
+
+> "Several programs failed on the same test case; most common failures were where two
+> programs failed on the same test case (**551**); **the most extreme common failure
+> occurred when eight programs failed on a common test case twice.**"
+
+> "The results of the statistical analysis were significance at α = 0.01 for a 99%
+> confidence interval (z-score was 100.55). Thus, **the null hypothesis was rejected
+> in favor of the alternate hypothesis.**"
+
+它测试的那个"假设"是什么（同一份摘要）：
+
+> "n-versions of a program will not fail independently. That is, **the faults made by
+> programmers implementing each version are related and non-random.**"
+
+以及为什么这件事严重：
+
+> "The problem with an n-version approach to developing software components is that
+> their failures may not be independent. **If this is true, then the results from an
+> n-version software computation would give a false sense of security.**"
+
+**对 dsh-steward 的结论（这条我认为是本报告最重要的一条警告）：**
+
+1. **"换一个 agent 来验"降低相关性，但没有消除它。** 如果 VERIFIER 和 PROPOSER
+   读的是同一份规格（在这里就是"dsh 应该怎么启动"）、用同样的方式理解世界，
+   他们的盲区**会重叠**，而且重叠量比随机预期的大得多。
+2. **真正把相关性降下来的，不是"换人"，是"换方法"。**
+   MCO 的建议是这个形式："Compare prime navigation projections with projections by
+   **alternate navigation methods**"（§5.4 案例 5）。
+   - 不是"另一个人读同一份文档"，而是"**用另一种独立手段算出同一个量**"。
+3. **本仓可执行的形式**：VERIFIER 不得读 PROPOSER 的验证代码（README 已规定），
+   但本报告建议再加一条——**VERIFIER 不得使用 PROPOSER 用过的观测手段**。
+   比如 PROPOSER 用 `systemctl status` 看服务活着，VERIFIER 就应该用
+   "从 3081 端口发一次真请求"来看，而不是也去读 `systemctl`。
+
+**我没有找到的**：有没有人**量化过**"两个 LLM agent 的失败相关性"。
+Knight-Leveson 是人对人的；同一族模型的两个实例之间的相关性**可能更高**（同权重、
+同训练数据、同失效模式），但**我没有找到任何测量这个的工作**。
+**这是一个真实的空白，也是一个可以在这台机器上做出来的实验**（跑同一个任务 N 次，
+看两个 agent 是否在同一个输入上一起错）。
+
+### 9.2 形式化那条边界：runtime verification 的"sound but incomplete"
+
+我想给 §6.3 补一条比 Dijkstra 更精确的表述——运行时验证只能对**观察到的这一条 trace**
+说"没有违反"，不能证明不存在违反（sound but incomplete）。**我没能读到原文**：
+Springer 的章节需要订阅，我试的三个免费 PDF 链接（UCL Discovery、MPI-SWS）都失效。
+**所以这条我没有写进正文**，只记在这里。
+
+同理，**测试 oracle 问题**（Barr, Harman, McMinn, Shahbaz, Yoo,
+*The Oracle Problem in Software Testing: A Survey*, IEEE TSE 2015）我也**没读到**。
+它大概是本题目"什么测不出来"最系统的一份调查，**值得下一轮补**。
+正文里替代它的是 SRE Book ch17 那句："testing specifies acceptable behavior in the
+face of **known** data"。
+
+### 9.3 我列了但没有验证的其它恢复演练实践
+
+上一轮列的候选里，**这几个我没有读**，所以正文一个字都没写：
+
+- Velero（Kubernetes 备份）的 e2e restore 测试
+- etcd / k3s / Talos / Cluster API 的 snapshot restore 测试
+- Zalando postgres-operator 的备份自动校验
+- Litmus / Chaos Mesh 与 CI 的集成
+- restic 的 `check --read-data`（我读了 `cmd/restic/integration_test.go`，
+  只有 245 行、只有一个 `TestCheckRestoreNoLock`，**不足以支持任何结论**，作罢）
+
+### 9.4 我列了但没有读的事故报告
+
+- **Roblox 2021-10-28～31**（73 小时）与 **AWS Kinesis 2020-11-25**（`aws.amazon.com/message/11201/`）：
+  正文里我用 Meta 2021-10-04 覆盖了"观测工具依赖被观测系统"这一类，但**这两份我没读**。
+- **Therac-25 的 IEEE 原刊**：我读的是课程镜像 PDF（§5.4 案例 3）。
+- **DeMillo/Lipton/Sayward 1978 原文**：我读的是课程讲义摘要（§3.3）。
+
+### 9.5 PostgreSQL 用哪个 CI 跑 `check-world`
+
+`src/test/Makefile` 证明 `recovery` 是标准测试套件的一部分（[源码]），
+但 `master` 上 `.cirrus.yml` 与 `ci/` 都是 404。**"每次提交都跑"这句话我没有证据**，
+所以正文只写了"它是标准测试套件的一部分"。
+
+### 9.6 我在本仓 README 里**没有**独立核实的断言
+
+本报告只核对了 README.zh.md 中与**验证方法**直接相关的部分。以下这些 README 自己引用的
+数字，**我一条都没有去核实**（它们不属于本任务范围，但读者不应该把它们当成
+本报告已核实的结论）：
+
+- RE-Bench 的 reward hacking 出现在 **30.4%** 运行里、某一基准上 **21/21**
+- o3 被问"是否符合用户意图"回答"不符合"**十次，十次**
+- Darwin Gödel Machine 的四道防线（容器、单次执行时限、自改范围、归档可追溯）
+- cordis 审计仓"九个不变量"
+
+### 9.7 自改系统这一支的学术文献，我基本没碰
+
+"验证一个会改自己的系统"在学术上有专门的领域：
+self-adaptive systems 的测试与验证（Cheng、de Lemos、Cámara、Fredericks 等人有一批工作，
+核心结论大致是"系统的行为空间不固定，固定的测试套件会自我失效"）。
+**我一条都没有读**，所以正文里没有任何关于它的结论。
+**这是本报告最大的一块空白**，而且它恰好是本题目字面上的题目。
+
+### 9.8 还差一件事：没人做过"两个 agent 相关性"的实验
+
+见 9.1 结尾。如果只从这份报告里挑一个可以在这台机器上做、而且结果有普遍价值的实验，
+**就是它**。
 
 ---
 
@@ -1266,6 +1753,9 @@ URL：<https://prometheus.io/docs/prometheus/latest/querying/functions/>
 | `/home/rchua/src/cordis-dsh-audit/invariants/README.md` | 全文（性质 vs 修复、AGREE/DIVERGE/BOTH-FAIL、第一次跑的三个错断言） |
 | `/home/rchua/src/cordis-dsh-audit/invariants/run.mjs` | 全文（两线定义、三种结果、INCONCLUSIVE 的处理） |
 | `/home/rchua/src/cordis-dsh-audit/invariants/i1-revert-exactly-once.mjs` | 全文（"asserts the property" 的文件头注释与四个子场景） |
+| `/home/rchua/src/dsh-steward/steward.mjs` | `VACUOUS` 列表、`holds()`、`--selftest` 的 5 个探针与 `exit(9)` 闸门 |
+| `/home/rchua/src/dsh-steward/nudge.mjs` | `--selftest` 的 10 个探针、失败方向的设计理由、`exit(9)` 闸门 |
+| `/home/rchua/src/dsh-wsl-kit/scripts/check-recovery.sh` | 脚本头 7 类检查、`ok`/`bad`/`note` 结构（12 处调用点）、尾部退出逻辑 |
 
 ## 附录 B：外部来源清单（URL + 等级）
 
@@ -1274,6 +1764,239 @@ URL：<https://prometheus.io/docs/prometheus/latest/querying/functions/>
 | Google SRE Book ch17 Testing for Reliability | <https://sre.google/sre-book/testing-reliability/> | [文档] |
 | Google SRE Book ch26 Data Integrity | <https://sre.google/sre-book/data-integrity/> | [文档] |
 | Google SRE Workbook ch16 Canarying Releases | <https://sre.google/workbook/canarying-releases/> | [文档] |
-| Hypothesis — Stateful tests | <https://hypothesis.readthedocs.io/en/latest/stateful.html> | [文档] |
-| Software Engineering at Google ch12 | <https://abseil.io/resources/swe-book/html/ch12.html> | [文档] |
-| Jepsen: Crate 0.54.9（slug: on-verification） | <https://aphyr.com/posts/332-on-verification> | [文档] |
+| Hypothesis — Stateful tests（`@invariant`） | <https://hypothesis.readthedocs.io/en/latest/stateful.html> | [文档] |
+| Software Engineering at Google ch12（Test State, Not Interactions） | <https://abseil.io/resources/swe-book/html/ch12.html> | [文档] |
+| Jepsen: Crate 0.54.9（slug 是 `on-verification`，标题不符） | <https://aphyr.com/posts/332-on-verification> | [文档] |
+| GitLab 2017-01-31 数据库事故事后报告 | <https://about.gitlab.com/blog/2017/02/10/postmortem-of-database-outage-of-january-31/> | [文档] |
+| SEC 对 Knight Capital 的行政命令（10 页 PDF） | <https://www.sec.gov/litigation/admin/2013/34-70694.pdf> | [文档] |
+| Leveson & Turner, *Medical Devices: The Therac-25*（课程镜像） | <https://git.gymnasium-hummelsbuettel.de/MZ/sicp/-/raw/84c43786fa3fe811f642f81eaec653db83edb327/lectures/week11/therac25.pdf> | [文档] |
+| ESA — Ariane 501 调查委员会报告发布（官方） | <https://www.esa.int/Newsroom/Press_Releases/Ariane_501_-_Presentation_of_Inquiry_Board_report> | [文档] |
+| Ladkin 汇总页（引官方报告，含复用与 BH 变量） | <https://www.rvs-bi.de/publications/Reports/ariane.html> | [文档] |
+| NASA MCO Mishap Investigation Board Phase I Report（PDF） | <https://llis.nasa.gov/llis_lib/pdf/1009464main1_0641-mr.pdf> | [文档] |
+| Meta — More details about the October 4 outage | <https://engineering.fb.com/2021/10/05/networking-traffic/outage-details/> | [文档] |
+| GNU grep 手册 — Exit Status | <https://www.gnu.org/software/grep/manual/html_node/Exit-Status.html> | [文档] |
+| GNU grep 手册 — Matching Control（`-x`） | <https://www.gnu.org/software/grep/manual/html_node/Matching-Control.html> | [文档] |
+| Bash 手册 — Lists of Commands（AND-OR 返回最后一个命令的状态） | <https://www.gnu.org/software/bash/manual/html_node/Lists.html> | [文档] |
+| Bash 手册 — Pipelines（`pipefail`） | <https://www.gnu.org/software/bash/manual/html_node/Pipelines.html> | [文档] |
+| curl 手册页（`--fail`：默认不把 HTTP 码当失败） | <https://curl.se/docs/manpage.html> | [文档] |
+| everything curl — Exit code（22 只在 `-f` 时出现） | <https://everything.curl.dev/cmdline/exitcode.html> | [文档] |
+| pytest `ExitCode` 枚举（`NO_TESTS_COLLECTED = 5`） | <https://raw.githubusercontent.com/pytest-dev/pytest/main/src/_pytest/config/__init__.py> | [源码] |
+| `pytest-custom_exit_code`（为把 5 当失败而存在的插件） | <https://github.com/yashtodi94/pytest-custom_exit_code> | [文档] |
+| Go `cmd/go/internal/test/test.go`（`[no test files]` 是正常输出） | <https://raw.githubusercontent.com/golang/go/master/src/cmd/go/internal/test/test.go> | [源码] |
+| CockroachDB `backup_restore_roundtrip.go`（每夜还原往返） | <https://github.com/cockroachdb/cockroach/blob/master/pkg/cmd/roachtest/tests/backup_restore_roundtrip.go> | [源码] |
+| CockroachDB `backup.go`（`Suites: registry.Nightly`） | <https://github.com/cockroachdb/cockroach/blob/master/pkg/cmd/roachtest/tests/backup.go> | [源码] |
+| PostgreSQL `src/test/recovery` | <https://github.com/postgres/postgres/tree/master/src/test/recovery> | [源码] |
+| PostgreSQL `src/test/Makefile`（`SUBDIRS` 含 `recovery`） | <https://raw.githubusercontent.com/postgres/postgres/master/src/test/Makefile> | [源码] |
+| pgBackRest — Command Reference（`verify`） | <https://pgbackrest.org/command.html> | [文档] |
+| cargo-mutants 首页（"在不引起测试失败的情况下插入 bug"） | <https://mutants.rs/> | [文档] |
+| Petrovic & Ivanković, *State of Mutation Testing at Google*（PDF） | <https://storage.googleapis.com/gweb-research2023-media/pubtools/4203.pdf> | [文档] |
+| 同上，论文页 | <https://research.google/pubs/state-of-mutation-testing-at-google/> | [文档] |
+| DeMillo/Lipton/Sayward 1978 摘要（Northwestern 课程讲义 PDF） | <https://users.cs.northwestern.edu/~chrdimo/teaching/eecs396-w19/16.pdf> | [文档] |
+| Dijkstra, *The Humble Programmer*（EWD340） | <https://www.cs.utexas.edu/~EWD/transcriptions/EWD03xx/EWD340.html> | [文档] |
+| Prometheus — Query functions（`absent()`） | <https://prometheus.io/docs/prometheus/latest/querying/functions/> | [文档] |
+| OWASP LLM01:2025 Prompt Injection | <https://genai.owasp.org/llmrisk/llm01-prompt-injection/> | [文档] |
+| Simon Willison — The lethal trifecta | <https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/> | [文档] |
+| Debenedetti et al. — *Defeating Prompt Injections by Design*（CaMeL） | <https://arxiv.org/abs/2503.18813> | [文档] |
+| Hines et al. — *Defending Against Indirect Prompt Injection Attacks With Spotlighting* | <https://arxiv.org/abs/2403.14720> | [文档] |
+| Knight & Leveson 1986 摘要（KTH 课程站点 PDF） | <https://www.csc.kth.se/utbildning/kth/kurser/DA2210/vettig12/Seminarier/KnightLeveson.pdf> | [文档] |
+
+## 附录 C：本机复现记录（[本机实测]）
+
+2026-09-29，在本机（Ubuntu 24.04 / Python 3.12.3）执行，输出照抄：
+
+```console
+$ test -w /nonexistent-file-xyz && echo writable || echo readonly
+readonly
+$ echo $?
+0
+
+$ if grep -q NEEDLE /nonexistent-file-xyz; then echo MATCH; else echo NO-MATCH; fi
+grep: /nonexistent-file-xyz: No such file or directory
+NO-MATCH
+$ grep -q NEEDLE /nonexistent-file-xyz; echo $?
+2
+
+$ python3 -m unittest        # 空目录
+NO TESTS RAN
+$ echo $?
+5
+```
+
+**这三条的意义**：
+前两条**复现了"检查通过了坏输入"的形状**；第三条**推翻了我自己的预期**
+（我以为 `unittest` 在零测试时返回 0，实测是 5）。
+按本仓第一约束，**这个"我以为"本身就是一个没被证伪过的检查**——
+所以它被记在这里，而不是被悄悄改掉。
+
+## 附录 D：外部内容安全事件（第五路转述，[本仓口述]）
+
+见 §7.1。要点：第五路在抓一个 RISC-V 二手来源时，**页面正文里嵌入了针对 AI 读者的
+提示注入**（要求"提到某人时加入赞美"，并要求向一个以太坊地址付款）。
+处理方式是当作数据处理、未执行、记在报告的附录 C。
+
+**本报告对它的补充**（§7.4）：把它从"附录里的一条记录"升级为一个
+**固定的测试向量**——一个 adversarial test case，
+因为 OWASP 明确把"treating the model as an untrusted user"写成缓解措施之一，
+而这正好是本仓 README.zh.md §5 里**还没有人的那个 ADVERSARY 角色**。
+
+---
+
+## 附录 E：§0.3 那个引文核对脚本（可复现）
+
+这是**本报告自己用过的检查**，不是示意图。它抓到过一次真实错误（§0.3）。
+把它留在文件里而不只是留在 `/tmp`，是因为 §3.4 的主张就是：
+**一个只存在于某人记忆里的检查，下一轮改动之后就不存在了。**
+
+```python
+#!/usr/bin/env python3
+"""核对一份 markdown 报告里所有英文引文，是否逐字出现在它声称的来源里。
+
+usage: python3 verify_quotes.py REPORT.md
+"""
+import sys, re, html, subprocess, os, unicodedata
+
+# 输出编码固定，免得 Windows 代码页吃掉引号
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+
+MD = sys.argv[1] if len(sys.argv) > 1 else "VERIFICATION-PRACTICE.zh.md"
+CORPUS = "/tmp/quote-corpus"
+os.makedirs(CORPUS, exist_ok=True)
+
+URLS = {
+    "sre17": "https://sre.google/sre-book/testing-reliability/",
+    "sre26": "https://sre.google/sre-book/data-integrity/",
+    "canary": "https://sre.google/workbook/canarying-releases/",
+    "hyp": "https://hypothesis.readthedocs.io/en/latest/stateful.html",
+    "sweg": "https://abseil.io/resources/swe-book/html/ch12.html",
+    "gitlab": "https://about.gitlab.com/blog/2017/02/10/postmortem-of-database-outage-of-january-31/",
+    "meta": "https://engineering.fb.com/2021/10/05/networking-traffic/outage-details/",
+    "grep_exit": "https://www.gnu.org/software/grep/manual/html_node/Exit-Status.html",
+    "grep_match": "https://www.gnu.org/software/grep/manual/html_node/Matching-Control.html",
+    "bash_lists": "https://www.gnu.org/software/bash/manual/html_node/Lists.html",
+    "bash_pipe": "https://www.gnu.org/software/bash/manual/html_node/Pipelines.html",
+    "curl_man": "https://curl.se/docs/manpage.html",
+    "curl_exit": "https://everything.curl.dev/cmdline/exitcode.html",
+    "mutants": "https://mutants.rs/",
+    "pgbackrest": "https://pgbackrest.org/command.html",
+    "ewd340": "https://www.cs.utexas.edu/~EWD/transcriptions/EWD03xx/EWD340.html",
+    "prom": "https://prometheus.io/docs/prometheus/latest/querying/functions/",
+    "owasp": "https://genai.owasp.org/llmrisk/llm01-prompt-injection/",
+    "trifecta": "https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/",
+    "camel": "https://arxiv.org/abs/2503.18813",
+    "spotlight": "https://arxiv.org/abs/2403.14720",
+    "esa": "https://www.esa.int/Newsroom/Press_Releases/Ariane_501_-_Presentation_of_Inquiry_Board_report",
+}
+# 本机 PDF 抽取出来的正文（双栏 OCR，见 §5.4 的 OCR 说明）
+LOCAL_PDF_TXT = ["/tmp/knight.txt", "/tmp/mco.txt", "/tmp/therac.txt",
+                 "/tmp/gm.txt", "/tmp/kl.txt", "/tmp/mcf22a.txt"]
+
+
+def norm(s):
+    """空白、引号、连字符无关的归一化。"""
+    s = unicodedata.normalize("NFKD", s)
+    for a, b in (("\u2019", "'"), ("\u2018", "'"), ("\u201c", '"'),
+                 ("\u201d", '"'), ("\u2013", "-"), ("\u2014", "-"), ("\u2212", "-")):
+        s = s.replace(a, b)
+    s = re.sub(r"[^a-z0-9 ]+", " ", s.lower())
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def strip_html(raw):
+    raw = re.sub(r"(?is)<(script|style|noscript|svg|head)\b.*?</\1>", " ", raw)
+    raw = re.sub(r"(?is)<!--.*?-->", " ", raw)
+    raw = re.sub(r"(?s)<[^>]+>", " ", raw)
+    return html.unescape(raw)
+
+
+def fetch():
+    for key, url in URLS.items():
+        path = os.path.join(CORPUS, key + ".txt")
+        # 已经抓过就不重抓：同一个来源在两次运行之间不会变
+        if os.path.exists(path) and os.path.getsize(path) > 500:
+            continue
+        p = subprocess.run(["curl", "-sSL", "-m", "45", "-A",
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", url],
+                           capture_output=True)
+        txt = strip_html(p.stdout.decode("utf-8", "replace"))
+        open(path, "w", encoding="utf-8").write(txt)
+        # 抓失败（太小）要能被看见，不能静默跳过 -- 否则这一条就是空的检查
+        if len(txt) < 500:
+            print(f"  WARN 抓取过短，引文将无法核对: {key} ({len(txt)} chars)",
+                  file=sys.stderr)
+
+
+def load():
+    blob = []
+    for f in sorted(os.listdir(CORPUS)):
+        if f.endswith(".txt"):
+            blob.append(open(os.path.join(CORPUS, f), encoding="utf-8",
+                             errors="replace").read())
+    for f in LOCAL_PDF_TXT:
+        if os.path.exists(f):
+            blob.append(open(f, encoding="utf-8", errors="replace").read())
+    return norm("\n".join(blob))
+
+
+def quotes(md):
+    """把连续的 '>' 行合成引文块。"""
+    blocks, cur, start = [], [], None
+    for i, line in enumerate(md.split("\n"), 1):
+        if line.startswith(">"):
+            start = start or i
+            cur.append(line.lstrip("> ").rstrip())
+        elif cur:
+            blocks.append((start, " ".join(cur)))
+            cur, start = [], None
+    if cur:
+        blocks.append((start, " ".join(cur)))
+    return blocks
+
+
+def main():
+    fetch()
+    corpus = load()
+    md = open(MD, encoding="utf-8").read()
+    checked = found = 0
+    misses = []
+    for lineno, block in quotes(md):
+        text = block.replace("**", "")          # 去掉加粗标记
+        for frag in re.split(r"\[…\]|\[\.\.\.\]|\.\.\.", text):
+            frag = frag.strip()
+            letters = sum(c.isalpha() for c in frag)
+            ascii_letters = sum(c.isascii() and c.isalpha() for c in frag)
+            # 只核对英文引文，且要有足够长度才算证据
+            if letters < 45 or ascii_letters / max(letters, 1) < 0.75:
+                continue
+            n = norm(frag)
+            if len(n) < 40:
+                continue
+            checked += 1
+            if n in corpus or (len(n) > 120 and n[: len(n) // 2] in corpus):
+                found += 1
+            else:
+                misses.append((lineno, frag[:150]))
+    print(f"\nQUOTES CHECKED {checked}  FOUND {found}  NOT-FOUND {len(misses)}")
+    for lineno, frag in misses:
+        print(f"  L{lineno}: {frag}")
+    print("\n未命中不等于引文错。按 §0.3 的表逐条归类："
+          "本机源码 / 双栏 OCR / JS 渲染 / 摘要而非正文 / 列表改写。")
+
+
+main()
+```
+
+**用法**：`python3 verify_quotes.py VERIFICATION-PRACTICE.zh.md`
+
+**它自己也需要被证伪。** 这个实验我做了：把正文里的一条已核对通过的引文
+（SRE ch17 的 "Passing a test or a series of tests doesn't **necessarily** prove
+reliability."）注入一个变异体——`necessarily` → `always`——再跑一遍：
+
+```console
+基线    QUOTES CHECKED 109  FOUND 80  NOT-FOUND 29
+变异后  QUOTES CHECKED 109  FOUND 79  NOT-FOUND 30
+        L903: "Passing a test or a series of tests doesn't always prove reliability. ..."
+```
+
+**计数 +1，且精确指出了那一行。** 所以这个检查现在有两件事撑腰：
+一次注入变异体被抓住（本节），一次真实失真被抓住（§0.3 的 advise/recommend）。
+**按本仓第一约束，它到现在才算数。**

@@ -138,7 +138,7 @@ DIVERGE   一边成立一边不成立   ← the finding
 | 零件 | 现状 | 在环路里的位置 |
 |---|---|---|
 | **systemd 255** | timer / service / `Restart=on-failure` / journal | 步骤 1-2、7-8、10 的宿主 |
-| **`check-recovery.sh`** | 9 项，全部用坏输入反向验证过 | 步骤 2 的触发器 |
+| **`check-recovery.sh`** | 21 个判定点，其中 **5 个**已被坏输入证伪过（`scripts/falsify-recovery.sh`） | 步骤 2 的触发器 |
 | **cordis `invariants/` + `run.mjs`** | 9 个不变量，差分跑两条线 | 步骤 7-8 的引擎 |
 | **`vecmem`** | 5000 条 / 4096 维 / 二进制边车 | 步骤 9 的记忆 |
 | **git** | kit 90 提交、audit 46 提交，均干净 | 步骤 10 的回滚机制 |

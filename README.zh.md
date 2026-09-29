@@ -148,7 +148,7 @@ ADVERSARY 这个角色有一个具体实例：那个 `pkill` 检查被它的作�
 | 零件 | 状态 | 在环路里的位置 |
 |---|---|---|
 | systemd 255（timer / service / `Restart=` / journal） | 在跑 | 承载第 1–2、7–8、10 步 |
-| `dsh-wsl-kit/scripts/check-recovery.sh` | 9 项，每项都被坏输入证伪过 | 第 2 步 |
+| `dsh-wsl-kit/scripts/check-recovery.sh` | 21 个判定点，其中 **5 个**已被坏输入证伪过（`scripts/falsify-recovery.sh`） | 第 2 步 |
 | `cordis-dsh-audit/invariants/` + `run.mjs` | 9 个不变量，差分运行器 | 第 7–8 步 |
 | `vecmem` | 5000 条 / 4096 维，Float32 边车 | 第 9 步 |
 | git | kit 90 提交、audit 46 提交，均干净 | 第 10 步 |

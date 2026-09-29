@@ -179,7 +179,7 @@ Nothing has to be invented. It has to be assembled.
 | Part | State | Role in the loop |
 |---|---|---|
 | systemd 255 (timer / service / `Restart=` / journal) | running | hosts steps 1–2, 7–8, 10 |
-| `dsh-wsl-kit/scripts/check-recovery.sh` | 9 checks, each falsified with a bad input | step 2 |
+| `dsh-wsl-kit/scripts/check-recovery.sh` | 21 decision points, **5** of them falsified by bad input (`scripts/falsify-recovery.sh`) | step 2 |
 | `cordis-dsh-audit/invariants/` + `run.mjs` | 9 invariants, differential runner | steps 7–8 |
 | `vecmem` | 5000 items / 4096 dims, Float32 sidecar | step 9 |
 | git | kit 90 commits, audit 46, both clean | step 10 |
