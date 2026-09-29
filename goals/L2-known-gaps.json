@@ -20,9 +20,9 @@
     {
       "id": "L2.3",
       "objective": "vecmem 恢复演练：从一个备份真的还原一次",
-      "evidence": "test -f ~/.dsh/vecmem/.restore-drill-passed",
-      "verify": "cat ~/.dsh/vecmem/.restore-drill-passed 2>/dev/null || echo 'NOT DONE'",
-      "why": "L0.6 的下半句。SRE 调研说这是单机最值钱的实践。"
+      "evidence": "bash ~/src/dsh-steward/drills/vecmem-restore.sh >/dev/null 2>&1",
+      "verify": "bash ~/src/dsh-steward/drills/vecmem-restore.sh 2>&1 | tail -3",
+      "why": "2026-09-29 完成。判据不是「文件能打开」，是「消费者读它和读线上没区别」：同一个查询、同一组分数、同一批文本。四项全过（备份自洽 / 隔离还原 / 读回对账 / 插件对比逐位相同）。做成 drills/vecmem-restore.sh，退出码 0 全过 · 1 备份不自洽 · 2 还原对不上 · 3 消费者读不了。"
     },
     {
       "id": "L2.4",
