@@ -239,11 +239,155 @@ URL：<https://sre.google/workbook/canarying-releases/>
 
 ## 3. 变异测试：证明"测试能失败"（Q3）
 
-> 本节待补完。已确认要覆盖：DeMillo/Lipton/Sayward 1978 的原始动机；Google ICSE-SEIP 2018
-> 的实测结论（含"变异得分不作为目标"）；pitest / Stryker / cargo-mutants 的 CI 用法。
+### 3.1 定义就是对本题目的回答
 
-**已确认的一条（本仓、[源码]）**：`cordis-dsh-audit/invariants/README.md` 记录的三个 BOTH-FAIL 说明了一件事——
-**一个检查"跑了、返回了、印了一行 OK"，和"它能失败"是两件事**。这正是变异测试要回答的问题。
+**[文档]** `cargo-mutants` 的首页把这件事说得比任何论文都短：
+
+> "cargo-mutants is a mutation testing tool for Rust. It helps you improve your
+> program's quality by **finding places where bugs can be inserted without causing
+> any tests to fail.**"
+
+URL：<https://mutants.rs/>
+
+**"在不引起任何测试失败的情况下插入 bug"** —— 这就是"证明测试能失败"的**反命题形式**。
+变异测试不是在问"我覆盖了多少代码"，它在问：
+**"我在这一行放一个 bug，会有人（某个测试）叫出来吗？"**
+本仓第一约束是这句话在一条检查上的特例。
+
+### 3.2 工业界最大规模的一次实测：Google
+
+**[文档]** Petrovic & Ivanković, *State of Mutation Testing at Google*（ICSE-SEIP '18）。
+我下载了 Google 官方托管的 PDF 并抽取了正文。
+URL（论文页）：<https://research.google/pubs/state-of-mutation-testing-at-google/>
+URL（PDF）：<https://storage.googleapis.com/gweb-research2023-media/pubtools/4203.pdf>
+
+摘要里的定位：
+
+> "Mutation testing assesses test suite efficacy by inserting small faults into
+> programs and measuring the ability of the test suite to detect them. **It is widely
+> considered the strongest test criterion in terms of finding the most faults and it
+> subsumes a number of other coverage criteria.**"
+
+规模（这是"真的在用"的证据）：
+
+> "The described system is used by **6,000 engineers in Google** on all code changes
+> they author or review, affecting in total more than **14,000 code authors** as part
+> of the **mandatory code review process**. The system processes about **30% of all
+> diffs across Google** [...]"
+
+**最关键的一个实测数字**：
+
+> "**Over 87% of all test runs over mutants fail, killing the mutant.** This is not
+> the mutation score because of the probabilistic nature of mutagenesis where only a
+> subset of mutants is generated and evaluated, and many potential mutants are not
+> ever tested because they are in arid nodes."
+
+分语言的存活率（同一篇的 Figure 4）：
+
+| 语言 | 变异体数（占比） | 存活率 |
+|---|---|---|
+| Java | 543,541 (47%) | 13.2% |
+| C++ | 279,575 (24%) | 11.7% |
+| Python | 129,868 (11%) | 14.7% |
+| Go | 1,050.7 (9%) | 14.0% |
+| JavaScript | 86,123 (7%) | 13.1% |
+| TypeScript | 13,318 (1%) | 8.3% |
+| Common Lisp | 2,272 (1%) | 1.0% |
+
+（**"1,050.7" 是原 PDF 抽取出来的数字，看起来像排版错误**，照抄并标注。）
+
+**它对"变异得分"这个指标本身的态度，比数字更重要：**
+
+> "Mutation score is the ratio of killed mutants to the total number of mutants and
+> is a measure of this efficacy."
+
+> "At present it is **infeasably expensive** to compute the absolute mutation score
+> for the codebase at any given fixed point. It would be even more expensive to keep
+> re-computing the mutation score in any fixed time period (e.g., daily or weekly)
+> and it is almost imposible to compute the full score after each commit. **In
+> addition to the computation costs of the mutation score, we were also unable to
+> find a good way to surface it to the engineers in an actionable way.**"
+
+他们最后做的是一个 **diff-based**、只在改动行上生成变异体的系统，
+并且把"不有意思"的行叫做 **arid lines** 直接跳过：
+
+> "we present a diff-based probabilistic approach to mutation analysis that
+> drastically reduces the number of mutants by omitting lines of code without
+> statement coverage and **lines that are determined to be uninteresting - we dub
+> these arid lines**."
+
+**对本仓（一台机器、每天几次动作、没有 CI 集群）的三条结论**：
+
+1. **Google 都放弃全局变异得分了**，理由之一是"没找到把它变成可行动信号的方式"。
+   本仓更应该用的是**针对单个检查的、一次性的证伪实验**，而不是一个持续的变异得分。
+2. **"87% 的变异体会被测试杀死"意味着：在一个正常的测试套件里，"能失败"是默认预期。**
+   一个检查如果从没失败过，它在统计上就不像是一个正常的检查。
+3. **`arid lines` 这个概念可以直接搬**：本仓有些检查项检查的是"注释里有没有写某个词"
+   这类不可能有意义的断言。**分辨"这条检查能不能失败"之前，先分辨"它值不值得被失败"。**
+
+### 3.3 这个方法的来源
+
+**[文档]** 我**没有读到** DeMillo/Lipton/Sayward 1978 年的原文（多个镜像 404）。
+我读到的是一份课程讲义（Northwestern, EECS 396）对它的摘要，里面给出完整引文：
+
+```
+@article{HintsOnTestDataSelection,
+author={R. A. {DeMillo} and R. J. {Lipton} and F. G. {Sayward}},
+journal={Computer}, title={Hints on Test Data Selection: Help for the Practicing Programmer},
+year={1978}, volume={11}, number={4}, pages={34-41}, doi={10.1109/C-M.1978.218136}}
+```
+
+该讲义对论文动机的概括：
+
+> "First, they conjecture that many cases tests of a program that uncover simple
+> errors are also effective in uncovering much more complex errors. If this so-called
+> **Coupling Effect** is true, it can be used to save work during the testing process.
+> Mutation takes advantage of this hypothesis by making single syntactical changes to
+> the source code of a project, called a **mutant**. **If a mutant passes the test
+> cases the programmer knows that he or she needs to add new tests to differentiate
+> between the correct program and the mutant.**"
+
+URL：<https://users.cs.northwestern.edu/~chrdimo/teaching/eecs396-w19/16.pdf>
+
+**注意这里的措辞**：变异体**通过**测试，是"**你需要加测试**"的信号，
+不是"**代码有问题**"的信号。这正好对应 §1.1 那句
+"a failing test is a claim about the code *and* a claim about the test" 的镜像：
+**一个通过的变异体，是关于测试的断言，不是关于代码的断言。**
+
+### 3.4 本仓可以怎么用（最小可行版本）
+
+不需要引入任何工具。**一次"手写变异体"就够证明一条检查不是空的**：
+
+```python
+# 每次跑之前固定输出编码，避免 Windows 代码页吃掉引号
+import sys
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+
+# 伪代码：对每一条检查，构造一个"必须让它失败"的输入
+MUTANTS = {
+    # 检查在测什么            → 喂给它什么（已知坏输入）      → 期望
+    "L2 可写":   lambda: make_file_readonly(path),       "必须报 NOT writable",
+    "L3 存在":   lambda: remove_file(path),              "必须报 MISSING，不是 OK",
+    "L4 内容":   lambda: write_garbage(path),            "必须报 INVALID",
+    "恢复路径":   lambda: break_symlink(target),          "必须报 BROKEN",
+}
+
+for name, mutate, expect in MUTANTS:
+    with mutated(mutate):           # 改坏输入
+        got = run_check(name)
+    assert got != "OK", f"{name} 通过了一个刻意搞坏的输入 → 这个检查是空的"
+```
+
+**这就是"证伪记录"的可执行形式。** `check-recovery.sh` 号称"9 项，每项都被坏输入
+证伪过"（README.zh.md §6），但直到写下这段之前，**那个"被证伪过"只存在于人的记忆里**。
+把它写成一个每次改动后都会跑一遍的脚本，才是 SRE Book ch26 那句话的落实：
+"automate these tests whenever possible and then run them continuously"（§4.1）。
+
+**本仓已有的、形状相同的东西**：`steward.mjs --selftest`（5/5 探针）与
+`nudge.mjs --selftest`（10/10 探针）。README.zh.md 里记的两个探针——
+"不存在的命令必须返回 false"、"空回复必须读成错误，不是停止"——
+**就是两个手写变异体**：它们不问覆盖率，它们问"我在这个位置上制造一个坏输入，
+这条逻辑会不会叫"。§8 读它们的源码。
 
 ---
 
@@ -322,9 +466,144 @@ Gmail 2011 那次真实还原之所以能在数小时内给出预估：
 **DiRT 不是 CI**——它是**年度**的、有人参加的演练。这是本问的一个关键区分：
 **"自动化成 CI 的一部分"和"定期真人演练一次"是两种不同的东西，公开材料里前者远少于后者。**
 
-> 待补完：具体把 restore 放进流水线的项目。候选：CockroachDB 的 `roachtest` backup/restore、
-> PostgreSQL `src/test/recovery`、Velero 的 e2e restore、pgBackRest 的 `verify`、restic 的
-> `check --read-data`、etcd / k3s 的 snapshot restore 测试。**每一条都要真读到源文件才算数。**
+### 4.2 有没有人真的把"还原一次"放进自动化流水线
+
+**有，而且不止一个。但先说结论的形状：**
+
+| 做法 | 例子 | 频率 |
+|---|---|---|
+| **还原往返测试进 CI** | CockroachDB `backup-restore/round-trip` | 每晚（Nightly suite） |
+| **崩溃恢复测试进标准测试套件** | PostgreSQL `src/test/recovery` | 每次 `make check-world` |
+| **仓库校验命令（非还原）** | pgBackRest `verify` | 手动 / 可定时 |
+| **真人演练** | Google DiRT、Meta storm drills | 每年 / 定期 |
+
+**"每次都跑"的那种，是把恢复测试当成普通测试写进代码仓；"每年一次"的那种，是组织行为。两者不能互相替代。**
+
+#### CockroachDB：还原往返跑在每晚的 CI 里 [源码]
+
+我读了 `pkg/cmd/roachtest/tests/backup_restore_roundtrip.go`。文件里对这个测试的定义只有两行注释，
+但这两行就是本题目第 4 问要的答案：
+
+```go
+// backup-restore/round-trip tests that a round trip of creating a backup and
+// restoring the created backup create the same objects.
+func backupRestoreRoundTrip(
+	ctx context.Context, t test.Test, c cluster.Cluster, sp roundTripSpecs,
+) {
+```
+
+它注册进 CI 的方式（同一个文件）：
+
+```go
+Suites:                     registry.Suites(registry.Nightly),
+TestSelectionOptOutSuites:  registry.Suites(registry.Nightly),
+```
+
+注册的名字有四个：
+
+```
+backup-restore/round-trip
+backup-restore/small-ranges
+backup-restore/online-restore
+backup-restore/chaos
+```
+
+并且在恢复之后**真的去核对内容**，不是只看命令退出码：
+
+```go
+t.L().Printf("verifying backup %d", i+1)
+// Verify content in backups.
+err = d.verifyBackupCollection(
+```
+
+URL：<https://github.com/cockroachdb/cockroach/blob/master/pkg/cmd/roachtest/tests/backup_restore_roundtrip.go>
+（同目录的 `drt.go` 是另一套 Disaster Recovery Test 的 chaos 处理器，用 Prometheus 指标判
+"uptime 期间的错误率是否可接受"。）
+
+**"创建备份 → 还原 → 比对对象是否相同"——这是一个可执行的定义。**
+它同时绕过了本报告 §1.1 那个陷阱：它不断言"备份脚本存在"，它断言
+**"还原出来的东西和原来一样"**。
+
+#### PostgreSQL：崩溃恢复测试是标准测试套件的一部分 [源码]
+
+`src/test/Makefile` 的 `SUBDIRS` 里就有 `recovery`：
+
+```make
+SUBDIRS = \
+	authentication \
+	isolation \
+	modules \
+	perl \
+	postmaster \
+	recovery \
+	regress \
+	subscription
+```
+
+`src/test/recovery/README` 的全文开头：
+
+> "Regression tests for recovery and replication
+> This directory contains a test suite for recovery and replication.
+> [...] Either way, this test initializes, starts, and stops several test Postgres
+> clusters."
+
+URL：<https://github.com/postgres/postgres/tree/master/src/test/recovery>
+
+**含义**：PostgreSQL 的"恢复"不是一个单独的运维动作，它是**回归测试的一部分**——
+也就是说，**每一个改动都要过它**。这是本问最强的那个形态：
+**恢复不是演练，恢复是测试套件里的一类测试。**
+
+（**我没能确认** PostgreSQL 现在用哪个 CI 配置跑 `check-world`：`master` 分支上
+`.cirrus.yml` 与 `ci/` 都是 404。**所以"每次提交都跑"这句话我没有直接证据**，
+只有"它是标准测试套件的一部分"这个源码证据。见 §9。）
+
+#### pgBackRest：有一条 `verify` 命令 [文档]
+
+**[文档]** 命令参考里：
+
+> "**Verify Command (`verify`)**: Verify determines if the backups and archives in a
+> repository are valid."
+
+> "Set Option (`--set`): Backup set to verify. **Verify all database and archive files
+> associated with the specified backup set.**"
+
+URL：<https://pgbackrest.org/command.html>
+
+**诚实标注**：文档只说了它**判定有效性**。我**没有**在文档里找到"它会真的做一次
+完整还原"这句话，也**没有**读 pgBackRest 的源码。所以我不声称它是一个还原演练——
+它至少是一个**主动校验**（相比 GitLab 案例里"从来没人读过"的状态已经好了一层）。
+
+#### 组织级演练：Google 与 Meta [文档]
+
+- Google **DiRT**：年度演练，见 §4.1。Gmail 2011 能从磁带恢复，靠的是
+  "previously simulated many times"；Google Music 2012 能用上那个新工具，
+  靠的是"weeks after the company's annual disaster recovery testing exercise"。
+- Meta **storm drills**：见 §5.4 案例 6。长期在跑，但没覆盖"骨干网整体消失"。
+
+**两者都不是 CI。** 这是本问最重要的区分：
+
+> **自动化能覆盖的，是你已经知道该怎么还原的那条路径。
+> 演练能覆盖的，是你还不知道该怎么还原的那些场景。
+> 一个健康的系统两样都要，而且不能拿其中一样去顶另一样。**
+
+Google 的 DiRT 之所以能救 Google Music，不是因为 DiRT 是自动的，
+而是因为**那套工具在真正需要之前已经被真人跑过一次**。
+
+#### 一条可以直接抄的做法：给恢复流程加心跳
+
+**[文档]** SRE Book ch26（§4.1 已引）：
+
+> "Set up alerts that fire when a recovery process fails to provide a **heartbeat
+> indication of its success**"
+
+在单机上这条对应的是：
+
+- 恢复/校验任务写一个带时间戳的标记文件（或 journal 条目）；
+- 另有一条**独立于它**的检查，只在"这个标记超过 N 个周期没更新"时报警。
+
+**注意这里的结构**：报警的不是"恢复失败了"，而是"**恢复的汇报本身消失了**"。
+这能抓住 GitLab 那种"cron 跑了、失败了、邮件被丢了"的情况，
+而"检查退出码"抓不住。
 
 ---
 

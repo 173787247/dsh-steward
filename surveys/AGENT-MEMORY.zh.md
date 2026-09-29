@@ -2,7 +2,9 @@
 
 > 调研日期：2026-09-28。调研者：memory-surveyor（task-6）。
 > **本文件是 task-6 的唯一可写文件**，其余全部只读。
-> 本稿为完整版 v2（v1 为增量初稿，已被本稿取代）。
+> 本稿为完整版 v3（v1 增量初稿 → v2 完整稿 → v3 时效性更正）。
+>
+> ⚠️ **v3 更正提示**：**§14 修正了本稿关于 Letta 的描述** —— §3.2 / §6.1 / §6.2 / §7.3 / §8.3 写的是 `letta-ai/letta` 的 **`archive` 分支（已退役的 V1）**；Letta 的**现行实现**在 `letta-ai/letta-code`（TypeScript），做法完全不同（**记忆是一个 Git 仓库**）。**请先读 §14。**
 
 ## 0. 证据分级约定（贯穿全文）
 
@@ -33,6 +35,9 @@
 5. **★ 短消息（好 / 继续 / 不对）有三种已被实现出来的正解，外加两种通用技术。** 最直接的两个是：NousResearch/hermes-agent 用一条**正则**（字面包含 `ok|sure|continue|yeah|got it|...`）在**检索入口直接跳过**；mixpeek/amux 用**周围上下文替换 query**。见第 9 节 —— 这是本任务价值最高的部分。
 6. **"怎么知道自己记得对不对"，只有 Graphiti 把验证做成了常规写入路径**（每次写入都让 LLM 返回 `duplicate_facts` / `contradicted_facts` 两个整数列表，并做越界校验）。其余系统基本没有；评测靠 LongMemEval / MemoryAgentBench 这类外部基准。
 7. **一个反复出现的坑：把相关性阈值卡在融合之前。** mem0 源码注释明写 threshold 在 combine 之前生效 → 短消息的向量分低，**BM25 和实体图救不回来**。dsh-steward 若要用"成串意图"，绝不能照抄这个顺序。
+8. **★ 最活跃的 Letta 已经不是 MemGPT 了（v3 补录）**：现行实现（`letta-ai/letta-code`，TypeScript）把**记忆做成一个 Git 版控的 Markdown 仓库**，由后台记忆子智能体维护，**写入受 git hook 硬校验**、冲突走**认领状态机**（`claimed` / `in_progress` / `attempted`）。而 `letta-ai/letta`（24,950★）的 `main` 里**只剩文档**。→ **别用 star 数判断项目死活，要看 `default_branch` 有没有源码。** 详见 §14。
+9. **★ "带置信度的准入判据"确实存在，但只有两个实例**：CRAG 用**双阈值**把检索分数切成三档，中间那档（ambiguous）不丢弃也不盲用，而是**换知识源**；Letta V2 用**认领状态机**区分"有人在修 / 修过了但没成功"。其余全部是"单一聚合分数过阈值"，**没有不确定性建模**。详见 §14.4。
+10. **★ 压缩与检索可以接起来**：Letta V2 的 compaction prompt 要求摘要里带 **"Lookup hints"** —— 记下"被丢掉的内容该用什么关键词找回来"。→ **压缩不丢线索，而是留下可检索的钩子。** 详见 §14.5。
 
 ---
 
@@ -69,6 +74,8 @@
 | **物理载体轴** | MemOS | 这条记忆**物理上存在哪**（文本 / KV cache / LoRA 权重） |
 
 ### 3.2 Letta：可见性轴，3 层（【源码】）
+
+> ⚠️ **这是 Letta V1（`archive` 分支）的设计，已退役。** 现行实现见 **§14.2**（记忆 = Git 版控的 Markdown 仓库）。以下内容仍然有价值 —— 它是 MemGPT 谱系的经典分层，但**不要当成 Letta 的现状引用**。
 
 - **core memory**：一组 **block**。每个 block 有 `label` / `description` / `value` / `limit`（字符上限）/ `read_only`，`value` 编译进 system prompt，**永远在上下文里**。`letta/schemas/block.py:19-40`。
   - `CORE_MEMORY_BLOCK_CHAR_LIMIT = 100000`，`letta/constants.py:435`。
@@ -368,6 +375,8 @@ recency_vals = [persona.scratch.recency_decay ** i for i in range(1, len(nodes) 
 > 只写我读到实现细节的算法。**纯"用 LLM 总结"不写。**
 
 ### 6.1 Letta：部分驱逐 + 递归摘要（【源码】）
+
+> ⚠️ **V1（`archive` 分支）算法。** 但其核心参数（30%）在 V2 以 `LOCAL_DEFAULT_SLIDING_WINDOW_PERCENTAGE = 0.3` 延续了下来，见 **§14.5**。
 
 `services/summarizer/summarizer.py:136-243`，方法 `_partial_evict_buffer_summarization`。**具体到能复现**：
 
@@ -1071,3 +1080,257 @@ else:
 4. **SeCom（2502.05589）标题为 "On Memory Construction and Retrieval for Personalized Conversational Agents"** —— "记忆构造与检索"直击本题，且是**对话**场景。
 5. **LongMemEval / MemoryAgentBench 实测**：用它们量一下 dsh-steward 自己的记忆层，比继续读论文更有价值。
 6. **Reflexion（2303.11366）/ Sleep-time compute（2504.13171）** —— 与"验证"和"离线整理"相关。
+
+---
+
+## 14. ★ 时效性更正与新发现（v3 补录）
+
+> 本节是收到同批 os-projects-surveyor 的时效性线索后补做的核对结果。**它推翻/修正了本稿 §3.2、§6.1、§6.2、§7.3、§8.3 的部分内容**，请以本节为准。
+
+### 14.1 更正：Letta 的现行实现不是 MemGPT 的 block 体系
+
+我在 §3.2 / §6.1 / §6.2 / §7.3 / §8.3 描述的是 `letta-ai/letta` 的 **`archive` 分支（已退役的 V1 Python server）**。
+
+核对结果（我用 GitHub API 逐个查的字段）：
+
+| 仓库 | stars | 语言 | default_branch 里的源码情况 | 最后推送 |
+|---|---|---|---|---|
+| `letta-ai/letta` | 24,950 | Python | **`main` 只剩 15 个条目**（README/LICENSE/CITATION 等），无源码 | 2026-09-10 |
+| **`letta-ai/letta-code`** | **3,471** | **TypeScript** | `main` 有完整源码 | **2026-09-29** |
+
+`letta-ai/letta` 的 README 原文：
+
+> "Letta (f.k.a. MemGPT) is actively developed. **The current source code lives in `letta-ai/letta-code`**, which includes the agent harness, interactive terminal UI, App Server, channels, and the runtime used by the desktop and web apps."
+> "The **`archive` branch contains the retired Letta V1 API server**. Existing tags and releases remain available for reproducibility, but active projects should use the current source."
+
+→ **§3.2 的 block 体系（Human/Persona、`CORE_MEMORY_BLOCK_CHAR_LIMIT = 100000`、core/recall/archival 三层）属于 V1，不应被当成 Letta 的现状引用。** §6.1 的 30% 部分驱逐算法同样属于 V1（但它在 V2 里以另一个名字存活了下来，见 §14.5 —— 这反而印证了它是核心设计）。
+
+⚠️ **方法论教训（值得写进调研纪律）**：**判断一个记忆项目的现状，不能只看 star 数和仓库名，要看 `default_branch` 里到底有没有源码。**
+这与同批调研员关于 `open_issues_count` 含 PR 的提醒是**同一类问题**：**GitHub 的展示指标会误导判断，必须落到具体字段。**
+→ **star 数最少的那个仓库（letta-code, 3,471）才是活的；star 数最多的那个（letta, 24,950）只有文档。**
+
+### 14.2 Letta V2 的载体：**记忆是一个 Git 仓库**（【源码】）
+
+记忆不再是数据库里的 block，而是 **`$MEMORY_DIR` 下一个 Git 版控的 Markdown 文件系统（memfs）**。`src/agent/` 下的相关源文件：
+
+```
+memory-git.ts            memory-git-dir.ts        memory-worktree.ts
+memory-git-hooks.ts      memory-git-signing.ts    memory-git-config-lock.ts
+memory-git-windows-credentials.ts                 memory-conflict-repair.ts
+memory-filesystem.ts     memory-scanner.ts        memory-format.ts
+memory-operation.ts      memory-runtime.ts        memory-constraints.ts
+memory-constraints-audit.ts                       memory-auth.ts
+subagents/memory-worker.ts    subagents/memory-handoff.ts
+subagents/context-budget.ts   subagents/builtin/memory{,-v2}.md
+backend/local/compaction.ts   backend/local/initial-memory.ts
+backend/api/memfs-git-proxy.ts
+```
+
+**布局规则**（`src/agent/subagents/builtin/memory-v2.md` 原文）：
+
+> "Root `MEMORY.md` has no frontmatter and is an **index** linking core files and deferred indexes. Other root Markdown files are **core memory** and require exactly `name` and `description` frontmatter. Child directories contain memory only when they have a frontmatter-free `MEMORY.md`; other Markdown files in them also require `name` and `description`. `skills/` is separate **procedural memory**. Do not edit generated `memory_filesystem.md` or `.sync-state.json`."
+
+→ 分层重新出现，但轴变了：**root 直下 = core memory；子目录 + 自己的 MEMORY.md = deferred / 索引；`skills/` = 程序性记忆。** 仍然是 §3.1 说的"可见性轴"，只是"常驻"换成了"索引的第一跳"。
+
+**执行模型**（同文件原文）：每次记忆更新在**私有 worktree** 里做，harness 在结束时把 commit 合并回主 checkout，**未提交的东西直接丢弃**：
+
+> "For a memory update it is a private worktree of the agent's memory: the harness merges your commits into the main checkout when you finish, and **anything left uncommitted is discarded**."
+
+### 14.3 写入判据（V2）：**逐条可执行的写作纪律**（【源码】）
+
+`memory-v2.md` 原文（逐句读到的）：
+
+> "Capture the requested facts, preferences, corrections, or deletions. Use the assignment directly when it is sufficient. Consult the parent transcript only for **a specific missing fact or ambiguity**; do not read it for general orientation. **Preserve the exact scope of facts and exceptions without adding inferred preferences.** Keep quoted factual corrections and constraints **verbatim rather than generalizing them**. Update existing entries rather than duplicating them, and **replace stale information at its source**. Preserve unrelated content and established identity. **Do not store secrets or ephemeral task logs.** Update indexes when adding, moving, or deleting files.
+> Make focused edits. **Reorganize or defragment memory only when explicitly requested.** Do not perform transcript reflection or unrelated skill maintenance."
+
+→ 这是本次调研里**最像"纪律"的一套写入判据**，而且几乎每条都可判定：
+
+| 规则（原文） | 可判定性 |
+|---|---|
+| "without adding inferred preferences" | 可判定：抽取结果不得含未陈述的偏好 |
+| "verbatim rather than generalizing" | 可判定：用户修正必须原样引用 |
+| "replace stale information **at its source**" | 可判定：过时信息在原条目更新，不得新增 |
+| "Do not store secrets or ephemeral task logs" | 可判定：密钥/临时日志是明确黑名单 |
+| "Reorganize or defragment **only when explicitly requested**" | 可判定：禁止自作主张重排 |
+
+★ **呼应 §4.1**：mem0 那条 "Vague assistant characterizations ... **unless the user explicitly confirms them**" 是"不记未确认的"；
+Letta V2 的 "**without adding inferred preferences**" 是**同一原则的更强版本，且覆盖全部内容**（不再只限"助手对用户的描述"这一类）。
+→ **§11 缺口 2 需要下修**（见 §14.7）。
+
+### 14.4 ★ 带置信度 / 状态的准入判据（lead 特别关注的一类）
+
+> lead 的线索：SICA 用**置信区间下界**选版本（`select_base_agent()`，往前回扫第一个 `mean >= best_ci_lower` 的迭代），即"在噪声带内挑最新的"。问：记忆系统里有没有同类机制？
+> **答：有，两类，都不用量化置信区间，而是把"不确定"建成显式动作或状态。**
+
+#### (a) Letta V2：冲突修复的**认领状态机**（【源码】）
+
+`src/agent/memory-conflict-repair.ts` 的三种认领结果（源码原文）：
+
+```ts
+export type MemoryConflictRepairClaim =
+  /** Recorded; the caller launches a worker that carries `token`. */
+  | { status: "claimed"; token: string }
+  /** A running process is still repairing this conflict. */
+  | { status: "in_progress" }
+  /** A worker has run on this conflict and could not resolve it. */
+  | { status: "attempted" };
+```
+
+用 attempt token 做**单调认领**，源码注释原文：
+
+> "It is claimed under the checkout lease, inside post-turn sync or a worker's sync, and advanced or forgotten by the repair worker launched for it. **Every later transition names the attempt's token, so a worker that fails or is cancelled late can only touch its own record, never one a newer claim has written since.**"
+
+另有 `MemoryRepairKind = "conflict" | "invalid"`，以及用于识别未完成 Git 操作的常量：
+
+```ts
+const OPERATION_HEADS = ["MERGE_HEAD", "REBASE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"];
+```
+
+→ ★ **这正是"不是分数高就采纳"的那一类判据**：修复动作不是"谁都能修"，而是**先认领、携带 token、区分"有人在修 / 修过了但没成功"**。
+`"attempted"` 这个状态尤其关键 —— **"尝试过且失败了"是被持久记录的一等状态，不是静默重试。** 这和 SICA 的"往回回扫"异曲同工：**都拒绝"就地重试"，都要求先判断当前处于什么状态。**
+
+#### (b) Letta V2：修复不明时**不许猜**（【源码】）
+
+`memory-v2.md` 原文：
+
+> "If a merge or rebase is already in progress, resolve it first by reading both sides and preserving the intended memory. **Never prefer one side wholesale.** Stage only resolved files and finish the existing operation with a noninteractive editor. Do not abort, reset, stash, amend, discard, or commit unrelated changes. **If the intended resolution is unclear, leave the unresolved state intact and describe the blocker** in your final report."
+
+→ **"拿不准就保持未解决状态并上报"，而不是二选一。** 把"不确定性"当成一等公民，而不是必须消掉的噪声。
+
+#### (c) Letta V2：不许谎报成功（【源码】）
+
+同文件原文：
+
+> "Return a brief report of actual changes or the unresolved blocker. **Do not claim that an uncommitted edit or failed operation succeeded.**"
+
+→ 这条对"自治系统"极重要：**报告本身要受约束**。
+
+#### (d) Letta V2：**提交时硬校验（git hook）**（【源码】）
+
+`memory-constraints.ts` + `memory-git-hooks.ts`：约束由 **git hook 里跑的校验脚本**强制。
+
+- `MEMORY_CONSTRAINTS_VALIDATOR_NAME = "letta-memory-constraints.cjs"`
+- `MEMORY_CONSTRAINTS_UPDATE_ENV = "LETTA_MEMORY_CONSTRAINTS_UPDATE"`
+- 脚本支持 `--audit` 模式；布局策略来自文件 `letta-memory-layout-policy`
+- 校验失败文案示例（我读到的其中一条）：`"Move non-core detail out of root Markdown and behind MEMORY.md indexes."`
+- `memory-constraints-audit.ts` 导出 `validateMemoryConstraintsHead(...)`、`invalidPendingMemory(...)`，以及 `MemoryConstraintsValidationResult` / `InvalidPendingMemory` 两个接口
+
+→ ★ **记忆写入有"编译期检查"：不合规的记忆提交不进去。**
+对比 mem0 —— LLM 输出什么就是什么，没有任何校验（§8.2）。
+**这是本次调研里第二强的验证机制（仅次于 Graphiti 的 `resolve_edge`）。**
+
+#### (e) CRAG：**双阈值分级准入**（【源码】）—— 与 SICA 那条最像的机制
+
+CRAG `scripts/CRAG_Inference.py`：把检索评测器的 logits 分数用**两个阈值切成三段**，**每段接不同的知识源**。
+
+```python
+def process_flag(scores, n_docs, threshold1, threshold2):
+    flags = []
+    for score in scores:
+        if score >= threshold1:
+            flags.append('2')      # correct
+        elif score >= threshold2:
+            flags.append('1')      # ambiguous
+        else:
+            flags.append('0')      # incorrect
+
+    # 再按 query 聚合它的 n_docs 篇文档的 flag：
+    #   '2' in tmp_flag -> 2 ;  elif '1' in tmp_flag -> 1 ;  else 0
+```
+
+三档动作（`main()` 原文）：
+
+```python
+if flag == 0:
+    paragraphs.append(e)   # incorrect -> 用【外部】知识（web 搜索）
+elif flag == 1:
+    paragraphs.append(c)   # ambiguous -> 用【合并】知识
+elif flag == 2:
+    paragraphs.append(i)   # correct   -> 用【内部】知识
+```
+
+阈值默认值（`argparse`）：`--upper_threshold` 默认 `10`；`--lower_threshold` 默认 `10`，随后 `args.lower_threshold = -args.lower_threshold` → `-10`。
+分数直接取自评测器 logits：`scores.append(float(outputs["logits"].cpu()))`。
+
+**三个可直接迁移的设计点**：
+1. **不是"一个阈值 + 采纳/丢弃"，而是两个阈值 → 三档处置。** 中间那档（ambiguous）**既不丢弃也不盲用，而是换知识源**。
+2. **跨文档聚合是 OR（max-pooling），不是平均**：`if '2' in tmp_flag` —— 只要有一篇 correct，整个 query 就算 correct。对"多路检索、命中一路就够"的记忆场景，这是合适的聚合方式。
+3. **判据作用在"整批检索结果"上**，不是逐条采纳/丢弃。
+
+→ ★ 这就是 lead 说的那类"**不是分数高就采纳，而是带判断的准入**"，而且比 SICA 的 CI 下界更轻：**CRAG 把"不确定"显式建成了一条动作分支。**
+
+#### (f) 汇总：本领域现有的"准入判据"形态
+
+| 机制 | 系统 | 判据形态 | 证据 |
+|---|---|---|---|
+| 重复/矛盾二判 + idx 越界校验 | Graphiti | 结构化二列表 | 【源码】§8.1 |
+| **双阈值三档 + 换知识源** | **CRAG** | **分数带 → 动作** | **【源码】§14.4(e)** |
+| **修复认领状态机（claimed / in_progress / attempted）+ token** | **Letta V2** | **状态机，不是分数** | **【源码】§14.4(a)** |
+| **提交期硬校验（git hook + `--audit`）** | **Letta V2** | **布尔门禁** | **【源码】§14.4(d)** |
+| 拿不准就保持未解决 + 明确上报 | Letta V2 | 不确定性一等公民 | 【源码】§14.4(b) |
+| 重要性累积阈值（150） | Generative Agents | 单一聚合阈值 | 【源码】§9.5 |
+| 热度阈值 + LFU | MemoryOS | 单一聚合阈值 | 【源码】§5.1 |
+| 相关性阈值（**卡在融合前**） | mem0 | 单一阈值（**反面教材**） | 【源码】§7.1 |
+
+→ **能对上 SICA "带置信度的准入"的，是 CRAG 的双阈值和 Letta V2 的状态机。**
+→ mem0 / MemoryOS / Generative Agents 全部是"**单一聚合分数过阈值**"，**完全没有不确定性建模**（没有置信区间、没有多档、没有"尝试过但失败"的状态）。
+
+### 14.5 Letta V2 的压缩：**sliding_window 默认 30% + 带查找线索的摘要**（【源码】）
+
+`src/backend/local/compaction.ts` 的常量（源码原文）：
+
+```ts
+const ALL_WORD_LIMIT = 500;
+const SLIDING_WORD_LIMIT = 300;
+const SUMMARY_TRUNCATION_SUFFIX = "... [summary truncated to fit]";
+export const LOCAL_SUMMARY_TOOL_RETURN_TRUNCATION_CHARS = 2_000;
+const TRANSCRIPT_FALLBACK_MAX_CHARS = 120000;
+export const LOCAL_DEFAULT_COMPACTION_MODE = "sliding_window";
+export const LOCAL_DEFAULT_SLIDING_WINDOW_PERCENTAGE = 0.3;
+export type LocalCompactionMode = "all" | "sliding_window";
+```
+
+→ **V1 的 `partial_evict_summarizer_percentage = 0.30` 在 V2 以 `LOCAL_DEFAULT_SLIDING_WINDOW_PERCENTAGE = 0.3` 延续了下来。**
+（§6.1 的 30% 不是巧合，是**跨版本延续的核心设计**——这也让 §6.1 的价值从"V1 的旧算法"变成"现行设计的源头"。）
+
+两个 prompt：
+- `LOCAL_ALL_COMPACTION_PROMPT` —— "create a detailed summary of the conversation so far"，上限 **500 词**。
+- `LOCAL_SLIDING_WINDOW_COMPACTION_PROMPT` —— 原文："The following messages are being evicted from the **BEGINNING** of your context window. Write a detailed summary that captures what happened in these messages **to appear BEFORE the remaining recent messages** in context, providing background for what comes after."，上限 **300 词**。
+
+两个 prompt 都是 7 段结构，其中第 7 段是本节**最值得抄的一条**：
+
+> "7. **Lookup hints**: For any detailed content (long lists, extensive data, specific conversations) that couldn't fit in the summary, note the **topic and key terms that could be used to find it in message history later**."
+
+→ ★ **这是"检索感知的压缩"**：摘要不只记录结论，还**记录"被丢掉的东西该用什么关键词找回来"**。
+→ **对本机价值极大**：压缩掉的内容不是消失，而是**留下可检索的线索**。这是把"压缩"与"检索"接起来的少数实现之一（§9 的五条短消息解法里也没有这一条）。
+（V1 的 `middle_truncate_text` 在 V2 也有 TS 版：`compaction.ts:157` 的 `middleTruncateText`。）
+
+### 14.6 参考清单增补（§14 专用）
+
+**【源码】letta-ai/letta-code** — https://github.com/letta-ai/letta-code （TypeScript，3,471 stars，最后推送 2026-09-29）
+- `src/agent/subagents/builtin/memory-v2.md`（**全文**：布局规则、写入纪律、Git 纪律、报告纪律）
+- `src/agent/memory-conflict-repair.ts`（头部：`MemoryConflictRepairClaim` 三态、`MemoryRepairKind`、`OPERATION_HEADS`、`RepairAttempt{signature,token,state}`、token 注释）
+- `src/agent/memory-constraints.ts`（`MEMORY_CONSTRAINTS_VALIDATOR_NAME`、`MEMORY_CONSTRAINTS_UPDATE_ENV`、`MEMORY_CONSTRAINTS_VALIDATOR_SCRIPT`、`--audit`、`LAYOUT_POLICY_FILE = "letta-memory-layout-policy"`、错误文案）
+- `src/agent/memory-constraints-audit.ts`（`validateMemoryConstraintsHead`、`invalidPendingMemory`、两个接口）
+- `src/agent/memory-constants.ts`（`READ_ONLY_BLOCK_LABELS = ["memory_filesystem"]`）
+- `src/backend/local/compaction.ts`（常量表、两个 compaction prompt、`middleTruncateText`）
+- **仅核对存在性、未逐行读**：`memory-git.ts`、`memory-git-dir.ts`、`memory-worktree.ts`、`memory-git-hooks.ts`、`memory-git-signing.ts`、`memory-git-config-lock.ts`、`memory-git-windows-credentials.ts`、`memory-filesystem.ts`、`memory-scanner.ts`、`memory-format.ts`、`memory-operation.ts`、`memory-runtime.ts`、`memory-auth.ts`、`subagents/{memory-worker,memory-handoff,context-budget}.ts`、`subagents/builtin/memory.md`、`backend/local/initial-memory.ts`、`backend/api/memfs-git-proxy.ts`
+- 另：`letta-ai/letta`（V1）的 `archive` 分支 —— 即本稿 §3.2 / §6.1 / §6.2 / §7.3 的出处
+
+**【源码】CRAG** — https://github.com/HuskyInSalt/CRAG · arXiv 2401.15884
+- `scripts/CRAG_Inference.py`：`inference()`（logits 当分数，150-172）、`process_flag(scores, n_docs, threshold1, threshold2)`（174-196）、`main()` 三档动作（243-258）、`--upper_threshold`/`--lower_threshold` 默认值（216-221）
+- `scripts/train_evaluator.py`、`scripts/metrics.py`、`scripts/utils.py`、`scripts/data_process.py`、`scripts/{internal,external,combined}_knowledge_preparation.py`（**仅存在性**）
+
+### 14.7 §11 缺口的修订
+
+- **缺口 2（"只记验证过的"没有通用实现）→ 下修。**
+  Letta V2 的 `memory-v2.md` 已把 "**without adding inferred preferences**" + "**replace stale information at its source**" + "**verbatim rather than generalizing**" 作为**全局写入纪律**。
+  → 修正措辞：**该原则在 2026 年的 Letta 里已经落地为全局策略**；mem0 那条只是同一原则的受限早期版本。
+- **缺口 3（没有过期回检）→ 部分下修。**
+  Graphiti 的 `invalid_at` 仍是被动的；但 Letta V2 多了 `--audit` 模式 + `invalidPendingMemory` + **Git 历史**，至少具备"**事后审计一条记忆当初是怎么写进去的**"的能力（`git log` / `git blame` 天然可回溯）。
+  → 修正措辞：**缺的不是"审计能力"，而是"主动触发回检的时机"** —— 没人定义"什么时候该回头看一眼旧记忆"。
+- **新增缺口 9**：Letta V2 的 `memory-worker` / `memory-handoff` / `context-budget` 我只核对了**存在性**，**没读实现**。
+  → "记忆子智能体如何被调度、上下文预算怎么在主子智能体间分配"是下一步该看的（这可能回答"记忆整理该在什么时候跑"）。
+- **新增缺口 10**：**没有任何系统的"准入判据"用了量化的不确定性**（置信区间、方差、校准概率）。
+  最接近的是 CRAG 的双阈值（但是固定阈值，不随数据调整）和 Letta 的认领状态机（是状态，不是概率）。
+  → **"用置信区间下界做记忆采纳"目前是空白**，与 SICA 对照，这是个真实的原创空间。

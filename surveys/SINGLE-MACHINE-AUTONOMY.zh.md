@@ -29,8 +29,16 @@
 7. **睡眠期间错过的日历定时器只补跑一次**（`systemd.timer(5) · OnCalendar=`），`Persistent=true` 也只补一次。睡 8 小时错过 8 次 hourly → 恢复后跑 1 次。
 8. **DST 春季会让定时任务静默漏一天**：`[实测]` `*-*-* 02:30:00` 在 America/New_York 2026-03-08 的那次被整体跳过；秋季回拨不重复。
 9. **一台机器救不了自己"整机死亡"**，唯一原生手段是硬件看门狗（`systemd-system.conf(5) · RuntimeWatchdogSec=`），而它只能重启、不能修复。
-10. **自治系统的头号故障源是错误处理而不是硬件**（见 §3 的 OSDI'14 数据）；且**恢复代码平时不执行 → 会腐烂**（Crash-Only Software）。
+10. **单机没有 fencing，只有 cgroup**：Pacemaker 明确说"资源在本节点停不掉，就不能在别处起"；单机上"停不掉"会直接变成"起不来"（§3.2、§2.8 的 `--collect` 坑本质）。
 11. **"先落盘，再深挖"不是风格问题，是中断损失上界问题**（§5.3，本项目 2026-09-28 的第一手事故）。
+12. **灾难性故障的主因是错误处理，不是硬件**：OSDI'14 对 198 个真实故障的统计 —— **92%** 是"非致命错误被处理错"，**58%** 本可通过简单测试错误处理代码发现，而 **"错误处理器是空的、或只有一条打日志语句"被列为三大致命模式之一**（§3.4）。
+13. **只在异常时才走的恢复分支，几乎肯定没被测过**：让"恢复"成为唯一的启动路径（crash-only），否则恢复代码会腐烂（§3.3）。
+14. **单机的自动重启救不了坏配置**：CrowdStrike 2024 的坏配置文件把"一个组件坏"放大成"整机启动环"，必须人工介入（§6.7c）。**要的是回滚，不只是重启。**
+15. **急停开关必须独立于被它关停的系统**：Cloudflare 2019 因为自己的认证服务也挂了，进不了控制台，5 分钟才执行全球关停（§6.7a）。单机上同理 —— 自治 agent 的"暂停"不能依赖 agent 自己。
+16. **cron 与 systemd 在 DST 上行为相反**：cron 会"在时钟变更后不久补跑"被跳过的小时，systemd 则**静默跳过不补**（§2.9，`cron(8)` vs `[实测]`）。**跨调度器迁移时这是静默丢任务。**
+17. **默认值就是坑**：Docker `json-file` 的 `max-size` 默认 **-1（无限）**、`max-file` 默认 1（§6.4）；journald 的 `SystemMaxUse=` 是**软**限制，磁盘被别人占满时它不会回头删自己的旧文件（§6.1）；崩溃循环每次都会往 `/var/lib/systemd/coredump/` 写内存镜像（§6.5）。
+18. **重启前要排空，但单机的原生窗口只有 5 秒**：`logind.conf(5) · InhibitDelayMaxSec=` 默认 5；改配置优先 `daemon-reload`/`daemon-reexec`，**不要全量重启**（§5.3 答案 3）。
+19. **local-first 的工程定义是"本地与远程只差在配置里"**：`12factor.net/backing-services` —— "It makes no distinction between local and third party services"；模型侧用 `HF_HUB_OFFLINE=1` 做**硬离线**（缺文件立刻报错，而不是卡在网络超时里）（§4.1、§4.3）。
 
 ---
 
@@ -635,8 +643,12 @@ $ TZ=America/New_York systemd-analyze calendar \
 
 ### 4.1 原则：外部依赖应当是"可替换的挂载资源"
 
-`[URL]` The Twelve-Factor App · *Backing services* — https://12factor.net/backing-services
-核心主张：把数据库、队列、外部 API 一律当作**通过配置挂载的 attached resource**，而不是写死在代码里的东西。换一个 backing service 应当只改配置，不改代码。
+`[URL]` The Twelve-Factor App · *Backing services* — https://12factor.net/backing-services （已逐字核对正文）
+
+> A backing service is any service the app consumes **over the network** as part of its normal operation.
+> ... It **makes no distinction between local and third party services**. To the app, both are attached resources, accessed via a URL or other locator/credentials **stored in the config**. A deploy of the twelve-factor app should be able to **swap out a local MySQL database with one managed by a third party** ... without any changes to the app's code.
+
+★ "**makes no distinction between local and third party services**" 这一句就是 local-first 的工程定义：本地与远程的差别应当**只在配置里**，不在代码里。
 
 ★ 对自治系统的直接应用：**"远程 LLM API"和"本地 Ollama"应当是同一个接口的两个 backing service。** 断网时降级到本地模型（能力下降但仍能跑），而不是直接失败。这是"本地优先"在 agent 系统里最重要的落地形式 —— 它不是一个数据存储问题，而是一个**依赖可替换性**问题。
 
@@ -762,24 +774,33 @@ def load_checkpoint(path):
     """返回 (good_records, verdict)。verdict ∈ {'ok','torn_tail','corrupt_middle'}"""
     if not os.path.exists(path):
         return None, 'missing'
-    good, torn = [], False
-    with open(path, 'rb') as fh:                     # 二进制读: 避免半行触发解码异常
-        n = 0
-        for raw in fh:
-            n += 1
-            line = raw.rstrip(b'\r\n')
-            if not line:                              # 空行无害, 跳过
-                continue
-            try:
-                rec = json.loads(line.decode('utf-8'))
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                torn = True                           # 只有最后一行允许坏
-                break
-            good.append(rec)
-        if not torn:
-            return good, 'ok'
-    if n == 1 and not good:                           # 第一行就坏 = 中段损坏的极端情形
-        return good, 'corrupt_middle'
+    with open(path, 'rb') as fh:                      # 二进制读: 避免半行触发解码异常
+        lines = fh.read().split(b'\n')
+    while lines and not lines[-1].strip():            # 去掉文件末尾的空行
+        lines.pop()
+
+    good, first_bad = [], None
+    for idx, line in enumerate(lines):
+        try:
+            good.append(json.loads(line.decode('utf-8')))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            first_bad = idx
+            break
+
+    if first_bad is None:
+        return good, 'ok'
+
+    # 关键判断: 坏行之后还有没有"能解析的行"?
+    #   有  -> 中段损坏（中间丢过记录, 不能自动续跑）
+    #   没有 -> 只是最后一行被写坏（安全丢弃）
+    for line in lines[first_bad + 1:]:
+        if not line.strip():
+            continue
+        try:
+            json.loads(line.decode('utf-8'))
+            return good, 'corrupt_middle'
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
     return good, 'torn_tail'
 
 
@@ -1124,12 +1145,44 @@ Cloudflare 自己列出的"多重原因汇聚"，与自治系统最相关的几�
 
 ## 8. 没有找到依据的问题（不写结论）
 
-按调研纪律，以下问题**尚未拿到可引用来源**，因此本报告不给出结论：
+按调研纪律，以下问题**尚未拿到可引用来源**，因此本报告不给出结论。**这一节和正文一样重要**：它划出了"我不知道"的边界。
 
-1. **WSL2 在 Windows 宿主睡眠/`wsl --shutdown` 时 systemd timer 的行为** —— 机制上清楚（VM 不运行 → timer 不触发），但没有找到微软官方文档明确表述，故 §2.5 只作为"对本项目的含义"提示，不作为技术结论。
-2. **cron/crontab 的 DST 行为** —— 本机 `crontab(5)` 无相关小节；需要 Vixie cron 的实现文档或上游 man page。
-3. **Kubernetes CronJob 的"错过次数上限导致停止调度"** —— 待查官方文档。
-4. **单机自治的边界**（§3）：需要 Pacemaker fencing、OSDI'14 故障统计、Crash-Only Software、GitHub 2018 与 AWS "static stability" 等外部来源的核对，**尚未完成，故整节留空**。
-5. **本地优先的具体做法**（§4）：Ink & Switch 原文、HF/Ollama 离线环境变量、pip/npm/apt 离线流程、OCI 镜像离线搬运等，**尚未完成核对，故整节留空**。
-6. **"自我撑爆"的真实事故案例**（§6）：Cloudflare 2019-07-02、GitLab 2017-01-31、CrowdStrike 2024-07-19 等，**URL 与原文引述尚未核对，故未写入**。
-7. **`StartLimitIntervalSec=` 写在 `[Service]` 段时 systemd 是否给出警告** —— 只确认了它属于 `[Unit]` 段（`systemd.unit(5)` 分节），未实测警告行为。
+### 8.1 想查但拿不到依据的（不写结论）
+
+1. **WSL2 在宿主睡眠 / `wsl --shutdown` 时 systemd timer 的行为** —— 机制上清楚（VM 不运行则 timer 不触发），但**没有找到微软官方文档明确表述**。§2.5 只把它写成"对本项目的含义提示"，不作为技术结论。
+2. **Windows Task Scheduler 及其它调度器的同类陷阱** —— 未查证（§2.9 末尾）。
+3. **systemd 在 `StartLimitIntervalSec=` 被写进 `[Service]` 段时是否给出警告** —— 只确认了它属于 `[Unit]` 段（`systemd.unit(5)` 分节），**没有实测警告行为**。
+4. **BMC / IPMI 作为"真正的外部复位"**，以及 **A/B 引导自愈**（boot counting / RAUC / ostree / `systemd-sysupdate`）—— 未核对，故 §3.1 留白。这是"单机自治边界"里**最大的一块空白**：机器起不来时的自愈手段我没有依据可写。
+5. **systemd-oomd 误伤用户会话的具体案例** —— 知道存在争议，但**没有找到可引用的权威来源**，故 §6.6 只给"要有独立观测"的可操作结论，不写案例。
+6. **`docker system prune` 的确切行为与风险** —— 未核对（§6 未使用）。
+7. **cron 的 `*/N` 越界退化行为**（Vixie 实现细节）—— 未核对。本报告只引用了有本机 man page 依据的 `cron(8)` DST 段落。
+8. **DNS 在断网时的缓存行为细节**（systemd-resolved 缓存策略）—— 未核对，§4.5 标注为"不写"。
+9. **`restic check --read-data` 的页面正文** —— §5.2 引用了 https://restic.readthedocs.io/en/stable/045_working_with_repos.html ，但当场核验时返回 **HTTP 429（限流）**，**未能读到正文**。该条目前只有"工具名 + 文档位置"级别的支撑，**引用强度低于本报告其它条目**。
+
+### 8.2 主动放弃的来源（抓到页面但拿不到正文，因此不引用）
+
+调研中有两个来源我**打开成功但没有引用**，因为它们是前端渲染的页面，我拿不到正文，按纪律**宁可空着也不转述**：
+
+1. **Ink & Switch, *Local-First Software*** — https://www.inkandswitch.com/local-first/ （HTTP 200，正文取不到）→ 它是 local-first 的经典文献，但本报告**没有引用它的任何具体主张**，§4 改用了能拿到正文的 12factor / Hugging Face / Ollama / Let's Encrypt 文档。
+2. **AWS Builders' Library, *Static stability using Availability Zones*** — https://aws.amazon.com/builders-library/static-stability-using-availability-zones/ （HTTP 200，正文取不到）→ **本报告没有使用它**，§3.5 只用 GitHub 与 Cloudflare 的一手复盘。
+
+★ 这两条记录下来的意义：**"我知道这个来源存在"和"我据它下了结论"是两件事。** 前者不算依据。
+
+### 8.3 本次调研中实际被抓到并修正的错误（自我纠错记录）
+
+按"一条没被核实的结论不算结论"的要求，这里记录我在本次调研中**自己犯过并改掉的错**：
+
+1. **`--collect` / cgroup 那条因果链**：一开始只有"知道这个坑"，没有链路；补上 `systemd-run(1)` → `systemd.unit(5)` GC 条件第 7 条 → `systemd.kill(5) · KillMode=` 三处 man page 引用后，才敢写成 §2.8 的结论。
+2. **§5.2 的 Python 校验器第一版有真 bug**：它把"中段损坏"误报成"最后一行撕裂"（因为在遇到第一行坏数据时就 `break`，之后不再检查后面还有没有可解析的行）。**这个 bug 的方向恰好是最危险的**：它会让人从断裂的检查点"安全续跑"，从而漏掉工作。修正后按五种输入实测：
+
+   | 输入 | 期望 | 实测 |
+   |---|---|---|
+   | 完整三行链 | `ok`, `RESUME_AT=3` | ✅ 一致 |
+   | 最后一行撕裂 | `torn_tail`, 退出 0 | ✅ 一致 |
+   | 中段损坏 | `corrupt_middle`, 退出 3（**拒绝续跑**） | ✅ 一致（修正前误报为 `torn_tail`） |
+   | 末行撕裂 + 尾部空行 | `torn_tail` | ✅ 一致 |
+   | 空文件 | `ok`, `RESUME_AT=0` | ✅ 一致 |
+   | 文件不存在 | 退出 2 | ✅ 一致 |
+
+   ★ 这件事本身就是本报告主题的缩影：**校验器自己也需要被校验**；而错误的校验器比没有校验器更危险（它给出的是"通过"）。
+3. **12factor 的两句引文**：写进文档前逐字回查了原文（`12factor.net/processes` 与 `12factor.net/backing-services` 均 HTTP 200），确认引述与原文一致，而不是凭印象写经典语录。
