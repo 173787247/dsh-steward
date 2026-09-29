@@ -354,12 +354,157 @@ test -w file && echo writable || echo readonly
 
 ### 5.2 shell 里"永远通过"的几种标准形态
 
-> 待补完。已确认要覆盖并且要引原文的：
-> - `curl` 不加 `--fail` 时对 HTTP 500 返回 0；
-> - GNU grep 的退出码 0/1/**2**，以及 `if ! grep -q ...` 在文件不存在时"通过"；
-> - `pgrep` 存在的理由（避免 `ps | grep` 匹配到错误的行）；
-> - `set -e` 的例外与管道退出码；
-> - 测试运行器"跑了零个测试"却报成功（pytest 退出码 5 / Jest `--passWithNoTests` / `cargo test` 全是 `#[ignore]` / `go test ./...` 的 "[no test files]"）。
+**这一节全部在 2026-09-29 于本机复现过**（命令与输出如下）。它们不是"可能会踩的坑"，
+是**写错一个字符就会得到的默认行为**。本仓的 `check-recovery.sh`、`steward.mjs`、
+`nudge.mjs` 都是 shell/Node 写的，所以这几种形态**直接适用于本仓**。
+
+#### ① `a && b || c` 永远返回 0 —— 就是 §5.1 事故①的形状
+
+**[文档]** Bash 手册，Lists of Commands：
+
+> "The return status of AND and OR lists is **the exit status of the last command
+> executed in the list**."
+
+URL：<https://www.gnu.org/software/bash/manual/html_node/Lists.html>
+
+只要 `b` 和 `c` 都是 `echo` 这类一定成功的命令，整个列表**永远返回 0**。本机实测：
+
+```console
+$ test -w /nonexistent-file-xyz && echo writable || echo readonly
+readonly
+$ echo $?
+0
+```
+
+文件不可写、`test` 失败，而**整行的退出码是 0**。把这一行当成 evidence 的检查，
+无论实际状态如何都会"通过"——`steward.mjs` 第一版就是这样报出 L2/L3/L4「全部满足」的。
+
+#### ② `curl` 默认不把 HTTP 400+ 当失败
+
+**[文档]** curl 手册页，`--fail` 条目：
+
+> "**By default, curl does not consider HTTP response codes to indicate failure.**"
+
+URL：<https://curl.se/docs/manpage.html>
+
+**[文档]** everything curl 的退出码页，对 22 号的说明：
+
+> "HTTP page not retrieved. The requested URL was not found or returned another
+> error with the HTTP error code being 400 or above. **This return code only
+> appears if -f, --fail is used.**"
+
+URL：<https://everything.curl.dev/cmdline/exitcode.html>
+
+所以 `curl -s http://127.0.0.1:3081/health` 在服务返回 500 时**退出码是 0**。
+一个"探活"检查如果只看 curl 的退出码，它探的是"TCP 通了并且服务器回了点东西"，
+不是"服务健康"。
+
+#### ③ `grep -q` 在文件不存在时返回 **2**，而不等于"没匹配到"
+
+**[文档]** GNU grep 手册，Exit Status：
+
+> "Normally the exit status is 0 if a line is selected, 1 if no lines were selected,
+> and **2 if an error occurred**. However, if the `-q` or `--quiet` or `--silent`
+> option is used and a line is selected, **the exit status is 0 even if an error
+> occurred**."
+
+URL：<https://www.gnu.org/software/grep/manual/html_node/Exit-Status.html>
+
+这段有两个独立的坑，第二个比第一个更狠：
+
+- **2 会被 `if` 吃成"没匹配"**。本机实测：
+
+  ```console
+  $ if grep -q NEEDLE /nonexistent-file-xyz; then echo MATCH; else echo NO-MATCH; fi
+  grep: /nonexistent-file-xyz: No such file or directory
+  NO-MATCH
+  $ grep -q NEEDLE /nonexistent-file-xyz; echo $?
+  2
+  ```
+
+  "我读不到那个文件"被报告成了"那个东西不在文件里"。
+- **`-q` 加"选中了一行"时，即使出错也返回 0**。即 `grep -q` 可以在**确实出了错**的情况下
+  报成功。
+
+#### ④ 默认匹配的是子串，不是那一行
+
+**[文档]** GNU grep 手册，Matching Control。`-x` 的定义本身就说明了默认行为：
+
+> "`-x`, `--line-regexp`: Select only those matches that **exactly match the whole
+> line.**"
+
+URL：<https://www.gnu.org/software/grep/manual/html_node/Matching-Control.html>
+
+**"整行精确匹配"是要显式开启的。** 本仓那个 `pkill` 检查——"在一个文件里找按端口限定的
+模式，结果两行无关的 `pgrep` 命中了它"——就是这个默认值的直接后果。**命令没错，默认值
+就是这样。**
+
+#### ⑤ 管道只看最后一个命令的退出码
+
+**[文档]** Bash 手册，Pipelines：
+
+> "The exit status of a pipeline is the exit status of **the last command in the
+> pipeline**, unless the `pipefail` option is enabled."
+
+URL：<https://www.gnu.org/software/bash/manual/html_node/Pipelines.html>
+
+`validate.sh | tee log.txt` 的退出码是 `tee` 的。**`tee` 几乎不会失败。**
+
+#### ⑥ 测试运行器"跑了零个测试"不是同一个退出码
+
+**[源码]** pytest 的 `ExitCode` 枚举（我读了 `src/_pytest/config/__init__.py` 的类定义）：
+
+```python
+class ExitCode(enum.IntEnum):
+    OK = 0
+    TESTS_FAILED = 1
+    INTERRUPTED = 2
+    INTERNAL_ERROR = 3
+    USAGE_ERROR = 4
+    NO_TESTS_COLLECTED = 5      #: pytest couldn't find tests.
+    MAX_WARNINGS_ERROR = 6
+```
+
+URL：<https://raw.githubusercontent.com/pytest-dev/pytest/main/src/_pytest/config/__init__.py>
+
+**"没有测试"是 5，不是 1。** 任何只把 `!= 0 && != 1` 当失败、或者带 `|| true` 的包装，
+都会把"一个测试都没跑"读成通过。有一个第三方插件存在**只为了让人把 5 当成失败**
+（`pytest-custom_exit_code`，GitHub 32 星），这件事本身就是这条坑的证据：
+<https://github.com/yashtodi94/pytest-custom_exit_code>
+
+**[源码]** Go 的 `cmd/go/internal/test/test.go`：
+
+```go
+if reportNoTestFiles {
+    fmt.Fprintf(stdout, "?   \t%s\t[no test files]\n", p.ImportPath)
+}
+```
+
+URL：<https://raw.githubusercontent.com/golang/go/master/src/cmd/go/internal/test/test.go>
+
+"[no test files]" 是一行**正常输出**，不是错误。测试文件被删光之后，
+`go test ./...` 会打印一堆 "[no test files]" 然后**退出 0**。
+
+**[本机实测]** `python3 -m unittest` 在没有任何测试的目录里，本机（Python 3.12.3）
+输出 "NO TESTS RAN" 并退出 **5**——这一点上 Python 的标准库比 pytest 更严。
+**这条我原本以为会是 0，实测推翻了它。** 记在这里，因为"以为"正是本题目要防的东西。
+
+#### ⑦ 一张自查表
+
+把上面五条压成可以在检查脚本上机械执行的规则：
+
+| 形态 | 为什么是空的 | 怎么查 |
+|---|---|---|
+| 无条件成功的命令（`echo`/`true`/`printf`/`cat`）出现在 evidence 里 | 它在报告一个值，不是在验证一个值 | 在 evidence 表达式里搜这些命令 |
+| `a && b \|\| c` 且 `b`、`c` 都没有可能失败 | 返回状态来自 `c` | 换成 `if/else`，或让分支返回非零 |
+| `curl` 没有 `-f` / `--fail` | HTTP 400+ 不算失败 | 搜所有 `curl` 调用 |
+| `grep -q` 的结果直接用 | 2（读不到）被当成 1（没匹配）；`-q` 还能在出错时报 0 | 断言前先显式区分 0/1/2 |
+| 没有任何 pattern/整行限定 | 默认是子串匹配整个文件 | 加 `-x`，或者只喂那一行 |
+| 管道结尾是 `tee`/`head`/`tail` | 退出码来自最后一个命令 | 开 `set -o pipefail` |
+| 退出码只判 `== 1` 算失败 | 5 / 2 / 3 都不是 1 | 判 `!= 0`，或显式列出所有非零码 |
+
+**这张表就是本仓第一约束可以被机器检查的那一半。** 另一半——"拿已知坏输入跑一次"——
+只能靠 ADVERSARY 角色做（README.zh.md §5）。
 
 ### 5.3 被证伪过的检查才配叫检查：Google 的同一个意思
 
@@ -390,9 +535,83 @@ URL：<https://sre.google/sre-book/testing-reliability/>
 
 ### 5.4 公开事故案例
 
-> 待补完。已确认要覆盖：GitLab 2017-01-31（多个备份机制同时失效，只有在尝试还原时才发现）、
-> Knight Capital 2012-08-01（自动部署到 8 台，验证认为成功）、Therac-25（软件联锁取代硬件联锁）、
-> Ariane 501（复用检查 + 前提假设从未被重新验证）、Mars Climate Orbiter（单位错位，两侧用同一个错误假设互相印证）、
+#### 案例 1：GitLab.com，2017-01-31 —— 四条恢复路径，四条都不可用
+
+**[文档]** 官方事后报告，我读了全文正文。
+URL：<https://about.gitlab.com/blog/2017/02/10/postmortem-of-database-outage-of-january-31/>
+
+事故本身：一名工程师在**误以为是 secondary** 的机器上执行了删除数据目录的操作，
+实际删的是 primary，约 300 GB 数据被删。然后去找备份：
+
+> "Hoping they could restore the database the engineers involved went to look for the
+> database backups, and asked for help on Slack. **Unfortunately the process of both
+> finding and using backups failed completely.**"
+
+报告里**逐条列出了四条恢复路径，也逐条列出了它为什么不能用**：
+
+1. **`pg_dump` → Amazon S3**（每 24 小时一次）
+
+   > "When we went to look for the pg_dump backups we found out they were not there.
+   > **The S3 bucket was empty, and there was no recent backup to be found anywhere.**"
+
+   原因：备份脚本跑在普通应用服务器上，那里没有 PostgreSQL 数据目录，
+   Omnibus 于是回退到 PostgreSQL 9.2 的 `pg_dump`，而生产库是 9.6（9.x 之间算 major），
+   **`pg_dump` 报错并终止了备份过程**。
+
+   **然后是这一条，它是本报告里最值钱的一句：**
+
+   > "While notifications are enabled for any cronjobs that error, these notifications
+   > are sent by email. For GitLab.com we use DMARC. Unfortunately DMARC was not
+   > enabled for the cronjob emails, resulting in them being rejected by the receiver.
+   > **This means we were never aware of the backups failing, until it was too late.**"
+
+   **检查本身是工作的，报警本身也是工作的，被丢掉的是一封邮件。**
+   一个"检查在跑、退出码非零、还发了通知"的系统，照样可以什么都没告诉你。
+
+2. **LVM 快照 → staging**（每 24 小时一次）
+
+   > "While this process was working as intended, the produced snapshots are **not
+   > really meant to be used for disaster recovery.**"
+
+   它是"把生产数据搬到 staging 去测"的工具，不是还原工具。最后正是靠一个人
+   **手动额外打的**那个 6 小时前的快照恢复的——**不是靠那条"每天自动跑"的路径**。
+
+3. **Azure 磁盘快照**
+
+   > "While enabled for the NFS servers, these snapshots **were not enabled for any of
+   > the database servers as we assumed that our other backup procedures were
+   > sufficient enough.**"
+
+   **一句话：因为"以为别的备份够了"，所以数据库服务器的快照根本没开。**
+   "假设"在这里是三重失效：假设 pg_dump 在工作、假设 LVM 能还原、假设前两者够了。
+
+4. **PostgreSQL 主从复制**
+
+   > "Replication between PostgreSQL hosts, primarily used for failover purposes and
+   > **not for disaster recovery**. At this point the replication process was broken
+   > and data had already been wiped from both the primary and secondary, meaning we
+   > **could not restore from either host**."
+
+最终结果：用 6 小时前的手工快照恢复，**丢失约 6 小时数据**；事后报告承认
+恢复流程从未按"还原"演练过。
+
+**这个案例对 dsh-steward 的四条直接教训**：
+
+1. **"每天自动跑"不等于"每天自动验证"**。pg_dump 每天跑、每天失败、每天发邮件——
+   四条链路里没有一环检查"**还原出来的东西对不对**"。
+2. **报警通道本身要有心跳**。这正是 SRE Book ch26 那条：
+   "Set up alerts that fire when a recovery process fails to provide a heartbeat
+   indication of its success"（§4.1）。GitLab 的 cron 有通知，但**没有"通知没送到"的检测**。
+3. **"我以为别的够用"是跳过某项检查的最常见理由，也是最贵的那个**。
+   本仓 README.zh.md §2 那句"用错了工具"，在 GitLab 这里是"用错了快照"。
+4. **最后真正救了它的，是一次人工的、计划外的动作**（工程师为做压测手动多打了一个快照）。
+   **靠运气兜底的系统，不配把那次成功记成"我们的恢复流程可用"。**
+
+#### 案例 2–6：待补完
+
+> 待补完。已确认要覆盖：Knight Capital 2012-08-01（自动部署到 8 台，验证认为成功）、
+> Therac-25（软件联锁取代硬件联锁）、Ariane 501（复用检查 + 前提假设从未被重新验证）、
+> Mars Climate Orbiter（单位错位，两侧用同一个错误假设互相印证）、
 > 以及"观测工具依赖被观测系统"的一类（Meta 2021-10-04 / Roblox 2021-10 / AWS Kinesis 2020-11-25）。
 
 ---
