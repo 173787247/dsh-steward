@@ -12,10 +12,10 @@
     },
     {
       "id": "L1.2",
-      "objective": "vecmem 里没有空文本或极短文本的垃圾条目",
-      "evidence": "node -e \"const fs=require('fs');const j=JSON.parse(fs.readFileSync(process.env.HOME+'/.dsh/vecmem/store.json','utf8'));process.exit(j.items.filter(i=>!i.text||i.text.length<10).length===0?0:1)\"",
-      "verify": "node -e \"const fs=require('fs');const j=JSON.parse(fs.readFileSync(process.env.HOME+'/.dsh/vecmem/store.json','utf8'));console.log('空/极短条目: '+j.items.filter(i=>!i.text||i.text.length<10).length)\"",
-      "why": "实测有一条只有 1 个字符。"
+      "objective": "vecmem 里没有【无来由】的空文本或极短文本",
+      "evidence": "node -e \"const fs=require('fs');const j=JSON.parse(fs.readFileSync(process.env.HOME+'/.dsh/vecmem/store.json','utf8'));const bad=j.items.filter(i=>(!i.text||i.text.length<10)&&!((i.meta||{}).kind));process.exit(bad.length===0?0:1)\"",
+      "verify": "node -e \"const fs=require('fs');const j=JSON.parse(fs.readFileSync(process.env.HOME+'/.dsh/vecmem/store.json','utf8'));const bad=j.items.filter(i=>(!i.text||i.text.length<10)&&!((i.meta||{}).kind));console.log(bad.length+' 条无来由的短条目');bad.slice(0,8).forEach(i=>console.log('  '+JSON.stringify(i.text)))\"",
+      "why": "2026-09-29 收窄。原判据是「< 10 字符即垃圾」，理由是当晚抓到 12 条切片残渣（'。' 'ache 2.0'）。但短消息功能上线后，「好」「VPN已关」这类用户真实说的话也短于 10 字符，而它们是【故意】保留的。★ 所以判据改为「< 10 字符【且没有 kind 标记】」—— 切片残渣没有来源标记，短消息有。当前 430 条短条目全部带 kind，0 条垃圾。★★ 这条不变量本身就是一个例子：一个检查会因为系统变化而变成错的，而它不会自己说。"
     },
     {
       "id": "L1.3",

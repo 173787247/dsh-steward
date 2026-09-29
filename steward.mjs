@@ -71,12 +71,30 @@ const VACUOUS = [
   [/\becho\b/,   'echo succeeds whatever the condition was'],
   [/\bprintf\b/, 'printf succeeds whatever the condition was'],
   [/^\s*true\s*$/, 'true succeeds by definition'],
-  [/&&[^|]*\|\|/, 'a && b || c returns the status of c, which is usually success'],
 ];
+
+/**
+ * The AND-OR form, but only where it is a shell construct.
+ *
+ * `a && b || c` returns the status of c, so when c is echo the whole thing always
+ * succeeds. That is the form worth flagging. But `(a || b) && c` inside a quoted
+ * JavaScript or Python expression is not the same thing at all, and the first
+ * version of this detector fired on it -- it flagged a perfectly good evidence
+ * command that happened to contain both operators inside a string.
+ *
+ * So: strip quoted regions first, then look. A detector that cries wolf gets
+ * switched off, which is worse than not having one.
+ */
+function andOrAlwaysSucceeds(cmd) {
+  const unquoted = cmd.replace(/'[^']*'/g, "''").replace(/"[^"]*"/g, '""');
+  return /&&[^|]*\|\|/.test(unquoted)
+    ? 'a && b || c returns the status of c, which is usually success'
+    : null;
+}
 
 function vacuous(cmd) {
   for (const [re, why] of VACUOUS) if (re.test(cmd)) return why;
-  return null;
+  return andOrAlwaysSucceeds(cmd);
 }
 
 function holds(cmd) {
