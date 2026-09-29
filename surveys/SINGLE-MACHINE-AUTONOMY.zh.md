@@ -534,17 +534,169 @@ $ TZ=America/New_York systemd-analyze calendar \
 - 边界：需要 `/dev/watchdog` 硬件支持；看门狗只能"复位"，不能判断"复位后能不能起来"；复位后的启动环（坏配置/坏引导）本机无解。
 - 对 WSL2：虚拟机内**没有**真实硬件看门狗可用 → 这一层保护在本项目环境下**完全不存在**。
 
-（待补：BMC/IPMI 作为"真正的外部复位"；fencing/STONITH 的经典论述；OSDI'14 的故障归因统计；"恢复代码会腐烂"的论文依据。）
+（未查证：BMC/IPMI 作为"真正的外部复位"的具体文档、A/B 引导自愈的细节 —— **不写**。）
+
+### 3.2 单节点没有 fencing，无法区分"我健康"和"我是唯一幸存者"
+
+`[URL]` Pacemaker Explained · 8.2 *Why Is Fencing Necessary?* — https://clusterlabs.org/pacemaker/doc/2.1/Pacemaker_Explained/html/fencing.html
+
+> Fencing protects your data from being corrupted by malfunctioning nodes or unintentional concurrent access to shared resources. Fencing protects against the "split brain" failure scenario, where cluster nodes have lost the ability to reliably communicate with each other but are still able to run resources. **If the cluster just assumed that uncommunicative nodes were down, then multiple instances of a resource could be started on different nodes.**
+
+同节第二条用途（很少有人引用，但对单机极其相关）：
+
+> Fencing is also used when a resource cannot otherwise be stopped. **If a resource fails to stop on a node, it cannot be started on a different node without risking the same type of conflict as split-brain.**
+
+★ 对单机的含义：**没有第二个节点来 fence 我，"停不掉的资源"就只能由我自己保证停掉。** 单机世界里 fencing 的替代品只有一个 —— cgroup（`KillMode=control-group` + 非空 cgroup 的后果，见 §1.4 / §2.8）。也就是说：**"停不掉"这件事在单机上会直接变成"起不来"**，这就是 `--collect` 那个坑的本质。
+
+### 3.3 恢复路径几乎从不被执行，所以会腐烂
+
+`[URL]` Candea & Fox, *Crash-Only Software*, HotOS 2003 — https://www.usenix.org/legacy/events/hotos03/tech/full_papers/candea/candea.pdf
+
+> **Crash-only programs crash safely and recover quickly. There is only one way to stop such software—by crashing it—and only one way to bring it up—by initiating recovery.**
+
+论文对"干净关闭 vs 崩溃恢复"两套代码的批评（原文）：
+
+> In the face of inevitable crashes, such a file system turns out to be brittle: a crash can lose data and, in some cases, the post-crash inconsistency cannot even be repaired. Not only do such performance tradeoffs impact robustness, but they also **lead to complexity by introducing multiple ways to manipulate state, more code, and more APIs.**
+
+★ 核心论点：**"干净关闭"路径和"崩溃恢复"路径是两套代码，而通常只有一套会被经常执行。** 推论：让"恢复"成为**唯一**的启动路径（crash-only），恢复路径就会天天被执行，不会腐烂。
+
+对自治系统的含义：**任何"只在异常时才走"的自愈分支，几乎肯定没被测过。** 自愈逻辑应当被设计成"每次启动都走"的主路径，而不是异常分支。
+
+### 3.4 灾难性故障的主因是错误处理，不是硬件
+
+`[URL]` Yuan et al., *Simple Testing Can Prevent Most Critical Failures*, OSDI 2014 — https://www.usenix.org/system/files/conference/osdi14/osdi14-paper-yuan.pdf
+（样本：HDFS / Hadoop MapReduce / HBase / Cassandra / Redis 上 **198 个随机抽样的真实故障**；其中 73 个被手工复现。）
+
+> almost all (**92%**) of the catastrophic system failures are the result of **incorrect handling of non-fatal errors** explicitly signaled in software.
+
+> in **58%** of the catastrophic failures, the underlying faults could easily have been detected through simple **testing of error handling code**.
+
+> in **35%** of the catastrophic failures, the faults in the error handling code fall into three trivial patterns: **(i) the error handler is simply empty or only contains a log printing statement**, (ii) the error handler aborts the cluster on an overly-general exception, and (iii) ...
+
+> in 76% of the failures, the system emits explicit failure messages; and in **84%** of the failures, all of the triggering events that caused the failure are printed into the log before failing.
+
+★ 直接映射到"无人值守自治运维"：
+
+1. **模式 (i) —— "错误处理器是空的，或者只是打了一条日志" —— 被这篇论文列为三大致命模式之一。** 这恰好就是"只报告不动手"的形态。这不是说报告没用，而是说：**报告之后如果没有明确的处理动作，在故障学意义上等同于没处理。**
+2. **92% 是"非致命错误被处理错"** —— 敌人不是"机器坏了"，而是"错误被处理错了"。**机器级故障的自治空间有限，错误处理的质量完全可控。**
+3. **84% 的失败，触发事件在失败前已经写进日志** —— 复盘时应该先读日志，而不是先怀疑硬件。
+
+### 3.5 "不要自动化那一步"是一种成熟立场（真实公司案例）
+
+**GitHub 2018-10-21**（43 秒的网络分区 → 24 小时以上的降级）：
+`[URL]` https://github.blog/news-insights/company-news/oct21-post-incident-analysis/
+
+> Guarding the confidentiality and integrity of user data is GitHub's highest priority. In an effort to preserve this data, we decided that the 30+ minutes of data written to the US West Coast data center prevented us from considering options other than failing-forward in order to keep user data safe.
+
+> In other words, our strategy was to **prioritize data integrity over site usability and time to recovery**.
+
+★ 这是"自治系统不该自动执行某些恢复动作"的最强论据：**自动 failover 会造成数据不一致，所以宁可降级 24 小时也不自动切。** 单机自治同理：**能自动执行的动作集合，必须严格小于"能执行的动作"集合**；且这个差集要有明确的、人能看懂的升级路径。
+
+**Cloudflare 2019-07-02**（一条自己的 WAF 规则 → 全球 27 分钟中断）：详见 §6.7(a)。其中"我们自己的控制台也挂了，进不去"这一条，直接说明**急停开关不能依赖被它关停的系统**。
+
+### 3.6 监控通道本身会挂 —— 需要"死人开关"
+
+- `[URL]` Prometheus Operator runbooks · **Watchdog** — https://runbooks.prometheus-operator.dev/runbooks/general/watchdog/
+  Watchdog 是"永远处于 firing 状态的告警"，它的唯一用途是**检测告警链路本身是否还活着**（如果连它都不响，说明监控/通知链路断了，而不是"一切正常"）。
+- 结构性原因：**报告通道与被监控对象共享同一个失效域**（同一台机器、同一个网络、同一个进程）。单机上不存在"绝对可靠的自检" —— 这是单机自治的**硬边界**，不是工程水平问题。
+
+★ 对 dsh-steward 的含义：一个"每 15 分钟报告一次"的 timer，如果**没有**"它自己没跑也要有人知道"的机制，那么"它没跑"和"一切正常"在观测上是**同一个现象**。这正是 §5.3 事故中"9 小时 24 分没人发现"的结构。
+
+### 3.7 数据层：SQLite 的自我定位
+
+`[URL]` SQLite · *Appropriate Uses For SQLite* — https://sqlite.org/whentouse.html
+
+> SQLite does not compete with client/server databases. **SQLite competes with fopen().**
+
+> Clients and servers ... Because an SQLite database **requires no administration**, it works well in devices that must operate **without expert human support**.
+
+★ 对单机的含义：SQLite 是"无人值守设备"的正确选择（零管理），但它**不是**高可用方案 —— 该页 *Situations Where A Client/Server RDBMS May Work Better* 一节明确列出它的边界（网络访问、高并发写）。**单机 + SQLite 的复制/故障切换不在 SQLite 的范围内。**
+
+### 3.8 汇总：单机能做 / 不能做
+
+| 能力 | 单机 | 依据 |
+|---|---|---|
+| 进程崩溃后自动重启 | ✅ | `systemd.service(5) · Restart=`（注意 `StartLimitBurst` 会停摆，§1.2） |
+| 进程"活着但不干活" | ✅ | `systemd.service(5) · WatchdogSec=`（需程序支持 `sd_notify`） |
+| 任务卡死超时 | ✅ | `RuntimeMaxSec=`（**对 oneshot 无效**） |
+| 整机挂死 | ⚠️ 只能硬件复位 | `systemd-system.conf(5) · RuntimeWatchdogSec=`；**WSL2 内无此能力** |
+| 断电 / 磁盘损坏 / 引导损坏 | ❌ | 需外部手段（细节未查证，不写） |
+| 数据损坏的**检测** | ✅（但要主动做） | 校验和 + 恢复演练，§5.2 |
+| 判断"我是不是唯一幸存者" | ❌ | 没有第二个节点，Pacemaker §8.2 |
+| 与另一副本的脑裂仲裁 | ❌ | 同上 |
+| 停不掉的资源 | ⚠️ 只有 cgroup 兜底 | `systemd.kill(5) · KillMode=`（§1.4） |
+| 可靠的对外告警 | ❌（同失效域） | Watchdog / dead-man's-switch，§3.6 |
 
 ---
 
 ## 4. 必须回答之问三：本地优先（local-first）的具体做法
 
-> 状态：**续写中**。需要核对 Ink & Switch 原文、Hugging Face / Ollama 的离线环境变量、pip/npm/apt 的离线安装流程、`git bundle`、OCI 镜像离线搬运等具体做法。**依据未核实前不写。**
+★ 先说一条负面结果（纪律要求）：local-first 的经典论文 *Local-First Software*（Ink & Switch）我抓到了页面（https://www.inkandswitch.com/local-first/ ，HTTP 200），但该页是前端渲染，**我拿不到正文**，因此**不引用它的任何具体主张**。本节全部结论改为引用能拿到正文的来源。
 
-已可写的一条（本机 man page）：
+### 4.1 原则：外部依赖应当是"可替换的挂载资源"
 
-**`git bundle` 可以离线搬运完整仓库**：`[man]` `git-bundle(1)` 存在的意义即"把对象与引用打包成单一归档，可在无网络的对端 clone/fetch"。具体做法与命令待与官方文档核对后补。
+`[URL]` The Twelve-Factor App · *Backing services* — https://12factor.net/backing-services
+核心主张：把数据库、队列、外部 API 一律当作**通过配置挂载的 attached resource**，而不是写死在代码里的东西。换一个 backing service 应当只改配置，不改代码。
+
+★ 对自治系统的直接应用：**"远程 LLM API"和"本地 Ollama"应当是同一个接口的两个 backing service。** 断网时降级到本地模型（能力下降但仍能跑），而不是直接失败。这是"本地优先"在 agent 系统里最重要的落地形式 —— 它不是一个数据存储问题，而是一个**依赖可替换性**问题。
+
+### 4.2 数据本地化
+
+| 对象 | 做法 | 依据 |
+|---|---|---|
+| Git 仓库 | `git bundle` 打成单一归档，在无 server 的对端 clone/fetch | `[man]` `git-bundle(1)`：**"'offline' transfer of Git objects without an active 'server' sitting on [the other end]"** |
+| apt 包 | `apt-get install -d`（`--download-only`）只下载不安装；`--print-uris` 只打印 URL 以便离线搬运 | `[man]` `apt-get(8)`：`-d, --download-only` / `--print-uris` |
+| 容器镜像 | `docker save` → 传文件 → `docker load` | `[URL]` https://docs.docker.com/reference/cli/docker/image/save/ |
+| Node 依赖 | `npm ci`（严格按 lockfile 安装，可复现） | `[URL]` https://docs.npmjs.com/cli/v10/commands/npm-ci |
+| Python 依赖 | 哈希锁定安装（防依赖被替换/降级攻击） | `[URL]` https://pip.pypa.io/en/stable/topics/secure-installs/ |
+
+★ "可复现安装"本身就是一种本地优先：**锁定版本的唯一意义，是让"今天能跑"和"断网三个月后还能跑"是同一件事。**
+
+### 4.3 模型本地化
+
+`[URL]` Hugging Face `huggingface_hub` 环境变量 — https://huggingface.co/docs/huggingface_hub/package_reference/environment_variables · `HF_HUB_OFFLINE`
+
+> If set, **no HTTP calls will be made to the Hugging Face Hub**. If you try to download files, only the cached files will be accessed. **If no cache file is detected, an error is raised**
+
+> Note: **even if the latest version of a file is cached, calling hf_hub_download still triggers a HTTP request** to check that a new version is available
+
+★ 两条可操作结论：
+1. `HF_HUB_OFFLINE=1` 是**硬离线开关**：不会偷偷回退到网络，缺文件就**立刻报错**。这种"明确失败"比"卡在网络超时里"好得多 —— **离线系统的第一需求是可预测的失败，而不是尽力而为。**
+2. **"文件已经在本地" ≠ "不会联网"**：默认每次调用仍会发 HTTP 请求去查新版本。所以要真离线，必须显式设 `HF_HUB_OFFLINE=1`。
+
+`[URL]` Ollama FAQ — https://docs.ollama.com/faq
+
+> **Ollama pulls models from the Internet** and may require a proxy server
+> ... create a new variable for your user account for `OLLAMA_HOST`, `OLLAMA_MODELS`, etc.
+
+★ 含义：**首次拉取模型需要网络，拉完之后推理是纯本地的**；`OLLAMA_MODELS` 决定模型存在哪（换盘/迁移时靠它）。所以"本地优先"不是"永不联网"，而是"**联网只发生在明确的准备阶段**"。
+
+### 4.4 时间与证书：离线环境里最先坏掉的东西（而且最容易被忽略）
+
+- **时间**：`[man]` `systemd-timesyncd.service(8)` —— "synchronizes the local system clock with a remote Network Time Protocol (NTP) server"，且 **"implements SNTP only"（不是完整 NTP 实现）**。断网时它无法校时 → 依赖时钟的一切（timer、证书校验、日志时序）开始漂移。无电池 RTC 的机器应当开 `systemd-time-wait-sync.service`（§2.7）。
+- **证书**：`[URL]` Let's Encrypt FAQ — https://letsencrypt.org/docs/faq/
+  > Our default certificates are valid for **90 days**. ... Subscribers can opt in to short-lived certificates which are valid for **six days**. **There is no way to adjust these lifetimes, there are no exceptions.** We recommend renewing 90 day certific[ates]...
+
+  ★ 对离线机器的含义：**本地服务的证书是一个 6–90 天的定时炸弹，而且期限不可调。** 内网/离线服务应该用自签 CA（长有效期）或干脆不套 TLS，而不是套用公网 CA 的短周期证书。**"自动续期"这条依赖链在离线环境里本身就是断的** —— 依赖它等于把服务的存活期绑定在网络上。
+
+### 4.5 断网时哪些还能跑（按依赖分层，而不是按功能分层）
+
+| 层 | 断网后 | 依据 |
+|---|---|---|
+| 本地推理（已下载的模型） | ✅ | `docs.ollama.com/faq`（拉取需要网络，推理不需要） |
+| 本地数据（SQLite / 文件） | ✅ | `sqlite.org/whentouse.html`（"requires no administration"） |
+| 依赖已锁定 / 已 vendored | ✅ | `npm ci`；pip hash-checking（§4.2） |
+| 远程 LLM API | ❌ | 需 §4.1 的"backing service 可切换"设计来降级 |
+| DNS 解析新域名 | ❌ | 缓存策略细节未查证 → **不写** |
+| TLS 证书已过期 | ❌ | `letsencrypt.org/docs/faq`（期限不可调） |
+| 系统时钟未同步 | ⚠️ 部分可用 | `systemd-timesyncd.service(8)` |
+
+### 4.6 对 dsh-steward 的落地结论
+
+1. **把"远程 API"与"本地模型"做成同一接口的两个 backing service**（§4.1）：断网时降级到本地小模型，而不是直接失败。
+2. **准备阶段联网，运行阶段离线**：模型/包/镜像在准备时拉齐；运行时用 `HF_HUB_OFFLINE=1` + `npm ci` + 哈希锁定做**硬离线**。硬离线开关的价值是"**明确失败**"，不是"尽力而为"（§4.2–4.3）。
+3. **不要把需要续期的公网 TLS 证书放进离线链路**（§4.4）。
+4. **时钟要当成显式依赖管理**（§4.4 + §2.7）：这是本项目 `clock_doctor` 存在的理由。
 
 ---
 
@@ -582,6 +734,111 @@ $ TZ=America/New_York systemd-analyze calendar \
 - `[URL]` Google SRE Book · Data Integrity — https://sre.google/sre-book/data-integrity/
 
 **最低成本的验证手段（本项目可立即采用）：在恢复路径上做"随机时刻 kill -9"演练。** 即：任务跑到任意进度时被 SIGKILL，然后从检查点重跑，断言"最终结果与不中断时一致，且没有重复副作用"。这正是 §5.3 事故的直接补丁。
+
+下面这个校验器把"检查点能不能续上"变成一条可进 CI 的命令：它读追加式 JSONL 检查点，**识别被写坏的最后一行**（进程在 write 中途被杀），并打印出"能安全续跑的位置"。核心设计点全部对应 §5.1 的三条规则：追加式、能识别撕裂、能独立读出进度。
+
+```python
+#!/usr/bin/env python3
+"""verify_checkpoint.py —— 校验追加式 JSONL 检查点能否安全续跑。
+
+用法:
+    python3 verify_checkpoint.py <checkpoint.jsonl>
+
+退出码:
+    0 = 检查点可用, 打印 "RESUME_AT=<n>"
+    2 = 文件不存在
+    3 = 不是撕裂, 而是中段损坏（比最后一行坏更严重, 必须人工介入）
+"""
+import sys
+
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # 硬性要求: 中文/损坏字节不炸
+
+import json
+import os
+import hashlib
+
+
+def load_checkpoint(path):
+    """返回 (good_records, verdict)。verdict ∈ {'ok','torn_tail','corrupt_middle'}"""
+    if not os.path.exists(path):
+        return None, 'missing'
+    good, torn = [], False
+    with open(path, 'rb') as fh:                     # 二进制读: 避免半行触发解码异常
+        n = 0
+        for raw in fh:
+            n += 1
+            line = raw.rstrip(b'\r\n')
+            if not line:                              # 空行无害, 跳过
+                continue
+            try:
+                rec = json.loads(line.decode('utf-8'))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                torn = True                           # 只有最后一行允许坏
+                break
+            good.append(rec)
+        if not torn:
+            return good, 'ok'
+    if n == 1 and not good:                           # 第一行就坏 = 中段损坏的极端情形
+        return good, 'corrupt_middle'
+    return good, 'torn_tail'
+
+
+def verify_chain(records):
+    """检查每条记录的 seq 递增、且 prev_digest 指向上一条的 digest。
+
+    这是"检查点是否可续"的核心断言：如果链断了, 说明中间丢过记录,
+    从断点续跑会漏掉工作（比重复更危险）。
+    """
+    prev = None
+    for i, rec in enumerate(records):
+        if rec.get('seq') != i:
+            return False, 'seq_mismatch@%d' % i
+        if prev is not None and rec.get('prev_digest') != prev:
+            return False, 'chain_break@%d' % i
+        prev = rec.get('digest')
+    return True, 'ok'
+
+
+def main(argv):
+    if len(argv) != 2:
+        print(__doc__)
+        return 64
+    path = argv[1]
+    records, verdict = load_checkpoint(path)
+    if verdict == 'missing':
+        print('ERROR: checkpoint not found: %s' % path)
+        return 2
+
+    print('CHECKPOINT=%s' % path)
+    print('VERDICT=%s' % verdict)
+    print('RECORDS=%d' % len(records))
+
+    if verdict == 'corrupt_middle':
+        print('REFUSE: 中段损坏, 不能自动续跑（需要人工判断）')
+        return 3
+
+    ok, why = verify_chain(records)
+    print('CHAIN=%s (%s)' % ('ok' if ok else 'broken', why))
+    if not ok:
+        print('REFUSE: 链断, 续跑会漏工作')
+        return 3
+
+    print('RESUME_AT=%d' % len(records))   # 下一步应当从这里开始
+    if verdict == 'torn_tail':
+        print('NOTE: 最后一行撕裂（进程在写中途被杀）, 已丢弃; 本次最多损失一条记录')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv))
+```
+
+★ 这份脚本刻意体现的四个检查点设计决定（每条都有 §5.1 的依据）：
+
+1. **追加式（append-only）**：撕裂只可能发生在最后一行 → 损失上界是一条记录，而不是整个文件。
+2. **二进制读 + 逐行解析**：半行 JSON 不会让校验器自己崩掉（校验器崩了就等于没有校验器）。
+3. **`prev_digest` 哈希链**：能区分"撕裂的最后一行"（可安全丢弃）和"中段丢失"（**必须拒绝续跑** —— 因为少一条记录 = 漏掉一份工作，比重复执行更危险）。
+4. **`RESUME_AT` 可被外部读取**：检查点的进度必须是**外部可读的**，否则没法在 CI 里断言"恢复到正确位置"。这正是"没被恢复过的检查点不算检查点"的落地形式（§5.2 开头）。
 
 ### 5.3 【第一手】本次中断就是检查点缺失的活样本
 
@@ -676,7 +933,7 @@ $ TZ=America/New_York systemd-analyze calendar \
 
 ## 6. 必须回答之问五：自我撑爆（日志/缓存/临时文件）
 
-> 状态：**续写中**。已有本机 man page 依据的部分先写如下；Docker/容器日志、core dump、真实事故案例（Cloudflare / GitLab / CrowdStrike 等）待核对 URL 后补。
+本节从"机制"和"真实事故"两侧各查一遍：机制来自 systemd/Docker 官方文档（§6.1–6.6），事故来自 Cloudflare / GitLab / CrowdStrike 的官方复盘（§6.7）。
 
 ### 6.1 journald 的边界是"软"的
 
@@ -719,7 +976,114 @@ x     /path-or-glob/to/ignore/recursively -    -    -     cleanup-age -
 - 清理时机：`[本机文件]` `/lib/systemd/system/systemd-tmpfiles-clean.timer` = `OnBootSec=15min` + `OnUnitActiveSec=1d`（单调定时器，无 `Persistent=`，见 §2.6）。
 - `PrivateTmp=`（`[man]` `systemd.exec(5) · PrivateTmp=`）给每个服务独立的 `/tmp` 与 `/var/tmp` 命名空间 → **临时文件按服务隔离，不会互相污染，也不会堆在所有服务共用的 `/tmp` 里**。
 
-★ 对自治系统的含义：**"临时文件"如果没有 age 字段，就永远不会被清理**。自治 agent 产生的中间产物默认落在 `/tmp` 或自己的 `CacheDirectory=`；前者依赖 `systemd-tmpfiles` 的规则（Ubuntu 默认对 `/tmp` 有 age 规则），后者要用 `CacheDirectory=` + `systemctl clean --what=cache` 显式治理。**"我以后会清理"等于"永远不会清理"。**
+### 6.4 容器日志：默认根本没有上限
+
+`[URL]` Docker · *json-file logging driver* — https://docs.docker.com/engine/logging/drivers/json-file/
+
+> `max-size` The maximum size of the log before it is rolled. A positive integer plus a unit modifier ... **Defaults to -1 (unlimited).**
+> `max-file` The maximum number of log files that can be present. ... **Defaults to 1.**
+
+★ 默认配置下，**一个反复崩溃、反复刷日志的容器可以把宿主机磁盘写满**。必须显式设置 `max-size` + `max-file`。
+
+Docker 官方给出的全局配置示例（daemon.json）：
+
+```json
+{ "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3" } }
+```
+
+（同一页；注意官方提醒 daemon.json 里的 `log-opts` 值必须写成字符串。）
+
+### 6.5 core dump：崩溃循环 × 每次写盘
+
+`[URL]` `coredump.conf(5)`（Ubuntu 24.04 manpage）— https://manpages.ubuntu.com/manpages/noble/en/man5/coredump.conf.5.html
+
+> When "external" (the default), cores will be stored in **/var/lib/systemd/coredump/**
+
+> `MaxUse=`, `KeepFree=` — Enforce limits on the disk space, specified in bytes, taken up by externally stored core dumps. **MaxUse= makes sure that old core dumps are removed as soon as the total disk space taken up by core dumps grows beyond this limit**
+
+★ 对本机环境的直接含义：一个"崩溃 → 重启 → 再崩溃"的自治任务，**每次崩溃都会往 `/var/lib/systemd/coredump/` 写一份进程内存镜像**。这台机器有 249GB 内存、跑着 GPU 相关工作，进程内存动辄数 GB —— **崩溃循环 + core dump 是把磁盘撑爆的教科书路径**。上限只有 `MaxUse=`；也可以把 `ProcessSizeMax=0` 关掉落盘。
+
+### 6.6 内存侧：systemd 的 OOM 管理，以及"以为它在管"
+
+- `[man]` `systemd.resource-control(5) · ManagedOOMSwap=, ManagedOOMMemoryPressure=`（取值 `auto|kill`）—— 由 systemd-oomd 依据内存压力/swap 占用主动杀进程组。
+- `[man]` `systemd.service(5) · OOMPolicy=` —— 取值默认来自 `systemd-system.conf(5) · DefaultOOMPolicy=`。
+- `[URL]` `systemd-oomd.service(8)`（Ubuntu 24.04 manpage）— https://manpages.ubuntu.com/manpages/noble/en/man8/systemd-oomd.service.8.html ："A userspace out-of-memory (OOM) killer"。
+
+★ **本机实测（必须记下来）**：在本机（Ubuntu 24.04 WSL2）上
+
+```
+$ systemctl is-enabled systemd-oomd
+not-found
+$ ls /lib/systemd/system/systemd-oomd.service
+（不存在）
+```
+
+→ **`systemd-oomd` 在本机没有安装。** 也就是说：`ManagedOOMMemoryPressure=` 这类"按策略杀"的机制在本机**不存在**，内存压力下只剩内核 OOM killer 的默认行为（挑一个进程杀）。这属于"我以为是 systemd 在管，其实没管"的一类假设 —— 与本报告 §2.1（timer 静默跳过）、§2.8（`--collect` 失效）是同一类问题：**机制是否存在，必须实测，不能靠推测。**
+
+★ 反过来说，这也提示一个风险：**systemd-oomd 是"按压力杀进程组"的策略执行者，它的判断也会误伤**（Ubuntu 桌面版曾因此收到大量用户投诉）。因为我没有找到可引用的权威来源，**这里不写具体案例**；只给出可操作的结论：**如果启用了 oomd，自治系统要有"我被 oomd 杀了"的独立观测**，否则会把"被策略杀"误判成"程序崩溃"，从而进入错误的自愈分支。
+
+### 6.7 真实事故：自己把自己打垮
+
+**（a）Cloudflare 2019-07-02 —— 一条自己的规则耗尽全球 CPU**
+
+`[URL]` https://blog.cloudflare.com/details-of-the-cloudflare-outage-on-july-2-2019/
+
+> On July 2, we deployed a new rule in our WAF Managed Rules that **caused CPUs to become exhausted on every CPU core that handles HTTP/HTTPS traffic on the Cloudflare network worldwide.**
+
+> The CPU exhaustion was caused by a **single WAF rule** that contained a poorly written regular expression that ended up creating excessive backtracking.
+
+> Everything that occurred up to the point the rules were deployed was done "**correctly**": a pull request was raised, it was approved, CI/CD built the code and tested it, a change request was submitted with an SOP detailing rollout and rollback, and the rollout was executed.
+
+Cloudflare 自己列出的"多重原因汇聚"，与自治系统最相关的几条（原文摘要）：
+
+- "A protection that would have helped prevent excessive CPU use by a regular expression **was removed by mistake during a refactoring** of the WAF weeks prior—a refactoring that was **part of making the WAF use less CPU**."
+  → **为了省 CPU 的改动，删掉了防 CPU 失控的保护。** 优化本身制造了新故障面。
+- "The test suite **didn't have a way of identifying excessive CPU consumption**."
+- "The SOP allowed a non-emergency rule change to go globally into production **without a staged rollout**."
+- "The rollback plan **required running the complete WAF build twice taking too long**."
+- "**The first alert for the global traffic drop took too long to fire.**"
+- "**We had difficulty accessing our own systems because of the outage** and the bypass procedure wasn't well-trained on." + "SREs had lost access to some systems because their credentials had been timed out for security reasons."
+  → 从提出"全球关停 WAF"（14:02）到真正执行（14:07）用了 **5 分钟**：**在最需要 kill switch 的时候，kill switch 的入口也挂了。**
+
+★ 三条对单机自治直接适用的教训：
+
+1. **"流程全对"不等于不会炸**：PR、CI、变更单、回滚方案全齐，仍然炸了。治理必须针对**资源类失败**（CPU/内存/磁盘/日志/任务数），而不只是功能类失败。
+2. **测试测不出"消耗"**：所以单机自治必须有**运行时**资源上限（`CPUQuota=` / `MemoryMax=` / `TasksMax=` / `LogRateLimit*=`），不能靠测试覆盖。
+3. **kill switch 必须独立于被它关停的系统**。单机上的对应物：**自治 agent 的"暂停/急停"必须不依赖 agent 自己** —— 例如一个独立的 systemd unit、或者一个它不参与写的文件开关。
+
+**（b）GitLab 2017-01-31 —— 单点主库 + 备份链断裂**
+
+`[URL]` https://about.gitlab.com/blog/2017/02/10/postmortem-of-database-outage-of-january-31/
+
+> The primary's hostname is db1.cluster.gitlab.com, while the secondary's hostname is db2.cluster.gitlab.com. In the past we've had various other issues with this particular setup due to **db1.cluster.gitlab.com being a single point of failure**.
+
+事故过程（同一页）：工程师为了重建复制，在 secondary 上清空数据目录并重跑 `pg_basebackup`；期间主库的数据目录被误删（`pg_basebackup` 因 `max_wal_senders` 不足而反复失败、`strace` 显示卡在 `poll` 等一系列误导性现象，最终导致操作指向了错误的目录），多种备份/复制机制都没能救回，**丢失约 6 小时数据**。
+
+★ 对单机的教训：
+- **"备份存在" ≠ "备份可用"**（该文的叙述正是一连串"本该救命的机制都不可用"）。恢复演练的必要性见 §5.2。
+- **误导性的错误信息会把人引向更危险的操作**：`pg_basebackup` "hang 住且没有有意义输出" → 工程师加大 `max_wal_senders` → 重启 PostgreSQL → 继续试 —— **每一步都在原方向上更用力，而根因在别处。** 自治系统在同样情境下会**更快、更自信地**在原方向上更用力（没有人类的犹豫作为刹车）。
+- （我未逐字核对该文"5 种备份机制全部失效"的表述，故**不引用具体数字**。）
+
+**（c）CrowdStrike 2024-07-19 —— 坏配置 + 自动重启 = 不可自愈的启动环**
+
+`[URL]` CrowdStrike · *Channel File 291 Incident Root Cause Analysis*（PDF）— https://www.crowdstrike.com/wp-content/uploads/2024/08/Channel-File-291-Incident-Root-Cause-Analysis-08.06.2024.pdf
+
+（我确认了该 RCA 文档存在并抓取到正文；确认其内容方向为：通道文件的生成/校验环节出问题，导致大范围主机进入重启环、需要人工介入恢复。）
+
+★ 与 §1.2 的 `StartLimitAction=reboot-force` 对照：**"自动重启"对坏配置无效，而且会把"一个服务坏"放大成"整机不可用"。** 无人值守系统必须有"回滚到上一个已知可用状态"的能力，而**不只是**"重启"。没有回滚能力的自动重启，会把一次配置错误变成一个启动环。
+
+（我未能完整核对 RCA 中关于人工恢复规模的具体数字，故**不引用数字**。）
+
+### 6.8 防"自撑爆"自查清单
+
+1. `journalctl --disk-usage`；`SystemMaxUse=` 是否显式设置（默认是**软**限制，§6.1）
+2. 所有容器日志驱动是否设了 `max-size` / `max-file`（默认**无限**，§6.4）
+3. `/var/lib/systemd/coredump/` 的占用 + `MaxUse=`（崩溃循环会撑爆，§6.5）
+4. 临时产物目录是否有 age 字段（没有 age = 永不清理，§6.3）
+5. 是否有**资源类**告警（磁盘/内存/任务数），而不只是功能类告警（§6.7a）
+6. 急停开关是否独立于被停的系统（§6.7a）
+7. 资源上限是运行时强制的（`CPUQuota=`/`MemoryMax=`/`TasksMax=`/`LogRateLimit*=`），而不是靠测试或"应该不会"（§6.7a）
 
 ---
 

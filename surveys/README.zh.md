@@ -10,6 +10,11 @@
 | 4 | 单机无人值守自治运维的成熟做法 | `SINGLE-MACHINE-AUTONOMY.zh.md` |
 | 5 | 国产化替代栈的实际可用性 | `CHINA-STACK.zh.md` |
 
+## ★ 先读这份
+
+**[`SYNTHESIS.zh.md`](SYNTHESIS.zh.md)** —— 五路 3,371 行变成决定。
+它只回答一个问题：哪些发现会让 dsh-steward 的设计变掉？
+
 ## 调研纪律（写进每个任务）
 
 1. **每条结论必须带 URL 或 repo 路径**

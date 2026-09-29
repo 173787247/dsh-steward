@@ -607,12 +607,226 @@ URL：<https://about.gitlab.com/blog/2017/02/10/postmortem-of-database-outage-of
 4. **最后真正救了它的，是一次人工的、计划外的动作**（工程师为做压测手动多打了一个快照）。
    **靠运气兜底的系统，不配把那次成功记成"我们的恢复流程可用"。**
 
-#### 案例 2–6：待补完
+#### 案例 2：Knight Capital，2012-08-01 —— 部署"完成"了，但没有人在第八台机器上看过
 
-> 待补完。已确认要覆盖：Knight Capital 2012-08-01（自动部署到 8 台，验证认为成功）、
-> Therac-25（软件联锁取代硬件联锁）、Ariane 501（复用检查 + 前提假设从未被重新验证）、
-> Mars Climate Orbiter（单位错位，两侧用同一个错误假设互相印证）、
-> 以及"观测工具依赖被观测系统"的一类（Meta 2021-10-04 / Roblox 2021-10 / AWS Kinesis 2020-11-25）。
+**[文档]** 美国 SEC 行政命令，10 页，我读了全文（`pdftotext` 抽的正文）。
+URL：<https://www.sec.gov/litigation/admin/2013/34-70694.pdf>
+
+新代码按天分阶段部署到 SMARS 的服务器上：
+
+> "Beginning on July 27, 2012, Knight deployed the new RLP code in SMARS in stages by
+> placing it on a limited number of servers in SMARS on successive days. **During the
+> deployment of the new code, however, one of Knight's technicians did not copy the
+> new code to one of the eight SMARS computer servers. Knight did not have a second
+> technician review this deployment and no one at Knight realized that the Power Peg
+> code had not been removed from the eighth server, nor the new RLP code added.
+> Knight had no written procedures that required such a review.**"
+
+第二天的结果：
+
+> "**The seven servers that received the new code processed these orders
+> correctly.** However, orders sent with the repurposed flag to the eighth server
+> triggered the defective Power Peg code still present on that server. As a result,
+> this server began sending child orders to certain trading centers for execution.
+> [...] this server continuously sent child orders, in rapid sequence, for each
+> incoming parent order without regard to the number of share executions Knight had
+> already received [...]"
+
+后果（同一份文件里的数字）：
+
+> "SMARS sent millions of child orders, resulting in 4 million executions in 154
+> stocks for more than 397 million shares in approximately 45 minutes. Knight
+> inadvertently assumed an approximately $3.5 billion net long position in 80 stocks
+> and an approximately $3.15 billion net short position in 74 stocks. Ultimately,
+> Knight realized a **$460 million loss** on these positions."
+
+**最要命的一段——信号其实存在，97 次：**
+
+> "Knight's system sent **97 of these e-mail messages** to a group of Knight personnel
+> before the 9:30 a.m. market open. **Knight did not design these types of messages to
+> be system alerts, and Knight personnel generally did not review them when they were
+> received.** [...] These notifications were not acted upon before the market opened
+> and were not used to diagnose the problem after the open."
+
+**三条可迁移的规则**：
+
+1. **"部署成功"是关于动作的断言，不是关于结果状态的断言。** 八台里有一台没变，
+   而**没有任何检查在问"八台现在是不是都一样"**。这是 README.zh.md §1.1 那个形状的
+   工业级实例：验证了我刚做的那个动作（跑部署脚本），没验证它可能弄坏的那个东西
+   （集群的一致性）。
+2. **"大部分是对的"会让抽样式检查通过。** 七对一错。任何"抽查几台/几个端口/几条记录"
+   的检查，在这个形状面前都是空的。
+3. **检查还有一个维度是"有没有人在读它"。** 97 封邮件躺在收件箱里，
+   与 GitLab 那封被 DMARC 丢掉的邮件是**同一个失败形状**：
+   信号产生了，信号没有到达任何会行动的地方。
+   → 对应 SRE Book ch26 那条"心跳"要求（§4.1）。
+
+#### 案例 3：Therac-25 —— 故障树在假设里就把"软件会错"排除掉了
+
+**[文档]** Leveson & Turner, *Medical Devices: The Therac-25*（IEEE Computer 26(7), 1993）。
+**我读的是一份课程镜像 PDF**（<https://git.gt.gymnasium-hummelsbuettel.de> 那个主机上的
+`lectures/week11/therac25.pdf`，`pdftotext` 抽取，OCR 有若干错字），**不是 IEEE 原刊**。
+引用时请以原刊为准。
+
+先看它怎么把硬件联锁去掉的：
+
+> "Therac-25 relies more on software for these functions. AECL took advantage of the
+> computer's abilities to control and monitor the hardware and **decided not to
+> duplicate all the existing hardware safety mechanisms and interlocks.** This
+> approach is becoming more common as companies decide that hardware interlocks and
+> backups are not worth the expense, or **they put more faith (perhaps misplaced) on
+> software than on hardware reliability.**"
+
+再看那份安全性分析：
+
+> "The fault tree resulting from this analysis does appear to include computer
+> failure, although apparently, **judging from these assumptions, it considers only
+> hardware failures.** For example, in one OR gate leading to the event of getting
+> the wrong energy, a box contains 'Computer selects wrong energy' and a probability
+> of 10⁻¹¹ is assigned to this event. [OCR 作 `10-l’`]"
+
+以及真正的机制：
+
+> "It is clear from the AECL documentation on the modifications that the software
+> allows concurrent access to shared memory, that there is no real synchronization
+> aside from data stored in shared variables, and that the 'test' and 'set' for such
+> variables are **not indivisible operations**. **Race conditions resulting from this
+> implementation of multitasking played an important part in the accidents.**"
+
+**两条可迁移的规则**：
+
+1. **一个在假设里就排除了某类失败的检查，它的结论一定是"那类失败不会发生"。**
+   这不是分析做错了，是**分析的输入里已经写好了答案**。
+   本仓版本：如果一条检查的输入是"我自己拼出来的路径"（README.zh.md §1.1 缺陷 4），
+   它能得出的结论上限就是"我拼得对"——**它无法发现那个路径和目标不一致**。
+2. **不要用被监督系统自己的一部分，去替代那个独立的监督者。**
+   AECL 用软件联锁替代硬件联锁，后来软件联锁被同一个软件里的竞态打败。
+   这正是 README.zh.md §4.4 那条"**能改的东西，不能包括评判它的东西**"。
+
+#### 案例 4：Ariane 501 —— 检查是对的，它检查的前提是错的
+
+**[文档]** ESA 官方新闻稿（引调查委员会报告原文）。
+URL：<https://www.esa.int/Newsroom/Press_Releases/Ariane_501_-_Presentation_of_Inquiry_Board_report>
+
+> "The failure of Ariane 501 was caused by the complete loss of guidance and attitude
+> information 37 seconds after start of the main engine ignition sequence (30 seconds
+> after lift-off). This loss of information was due to specification and design errors
+> in the software of the inertial reference system. **The extensive reviews and tests
+> carried out during the Ariane 5 development programme did not include adequate
+> analysis and testing of the inertial reference system or of the complete flight
+> control system, which could have detected the potential failure.**"
+
+> "It is stressed that alignement function of the inertial reference system, which
+> served a purpose only before lift-off (but remained operative afterwards), **was not
+> taken into account in the simulations** and that the equipment and system tests were
+> **not sufficiently representative**."
+
+**[文档]** 关于"复用"的那部分，我读的是 Ladkin 汇总页（它标注为引官方报告）：
+URL：<https://www.rvs-bi.de/publications/Reports/ariane.html>
+
+> "The conversion error occurred in a routine which had been **reused from the Ariane 4
+> vehicle, whose launch trajectory was different from that of the Ariane 5**. The
+> variable containing the calculation of Horizontal Bias (BH), a quantity related to
+> the horizontal velocity, thus went out of 'planned' bounds (**'planned' for the
+> Ariane 4**) and caused the Operand Error."
+
+**规则：检查本身没有坏，坏的是它默认成立的前提，而那个前提从来没被当成一个需要验证的东西。**
+
+"这段代码在 Ariane 4 上飞了很多年"被当成了"它在 Ariane 5 上也成立"的证据。
+**这正是 SRE Book ch17（§6.1）说的"过去可靠 ≠ 未来可靠"的教科书案例。**
+
+本仓版本：改完 `.env` 只检查了文件格式（缺陷 1）——格式检查没坏，
+坏的是"格式对 ⇒ dsh 能启动"这个前提。**前提变了（换了发行版、换了端口、
+换了一个 launch 上下文），检查通过就不再意味着任何事。**
+
+#### 案例 5：Mars Climate Orbiter —— 两条线共享同一个错误假设，于是 AGREE 什么都没说
+
+**[文档]** NASA MCO Mishap Investigation Board Phase I Report（我下载并抽取了全文）。
+URL：<https://llis.nasa.gov/llis_lib/pdf/1009464main1_0641-mr.pdf>
+
+根本原因：
+
+> "The MCO MIB has determined that the root cause for the loss of the MCO spacecraft
+> was the failure to use metric units in the coding of a ground software file, 'Small
+> Forces,' used in trajectory models."
+
+**这一句是整份文件的重点：**
+
+> "The data in the AMD file was required to be in metric units per existing software
+> interface documentation, and **the trajectory modelers assumed the data was provided
+> in metric units per the requirements.**"
+
+事后查明量化：
+
+> "On September 29, 1999, it was discovered that the small forces ∆V's reported by the
+> spacecraft engineers for use in orbit determination solutions was low by a factor of
+> **4.45** (1 pound force = 4.45 Newtons) because the impulse bit data contained in the
+> AMD file was delivered in lb-sec instead of the specified and expected units of
+> Newton-sec."
+
+它的"contributing causes"里，第 8 条就是验证：
+
+> "8. **Verification and validation process did not adequately address ground software**"
+
+> "It was not clear that the ground software independent verification and validation
+> was accomplished for MCO. **The interface control process and the verification of
+> specific ground system interfaces was not completed or was completed with
+> insufficient rigor.**"
+
+**而调查报告给出的建议里，有一条就是差分验证：**
+
+> "• **Compare prime MPL navigation projections with projections by alternate
+> navigation methods**"
+
+**规则（这条要同时记进 §2 和 §9）：**
+
+- **两个都在工作、都认为自己对的团队，如果共享同一个错误前提，他们互相印证出来的
+  只是一致性，不是正确性。** 导航组相信接口文档，软件组也相信接口文档。
+- **差分能抓住的是两条线之间的差，抓不住两条线共同的错。**
+  所以本仓的 `AGREE`（两边都成立）**不提供正确性证据**，只提供"没有差异"这个事实——
+  run.mjs 的报告措辞是诚实的，但读报告的人容易把它读高。
+- **MIB 的解法不是"更仔细地读文档"，而是"用另一种独立方法再算一遍"。**
+  这是"两条线"这个做法在事故调查报告里的正式形式。
+
+#### 案例 6：Meta，2021-10-04 —— 观测工具依赖被观测的系统
+
+**[文档]** Meta 工程博客，我读了全文。（Roblox 2021-10 与 AWS Kinesis 2020-11-25 两份
+**我没有读**，见 §9。）
+URL：<https://engineering.fb.com/2021/10/05/networking-traffic/outage-details/>
+
+> "And as our engineers worked to figure out what was happening and why, they faced two
+> large obstacles: first, it was not possible to access our data centers through our
+> normal means because their networks were down, and second, **the total loss of DNS
+> broke many of the internal tools we'd normally use to investigate and resolve
+> outages like this.**"
+
+> "Our primary and **out-of-band** network access was down, so we sent engineers onsite
+> to the data centers [...]"
+
+关于演练，它给了两句必须一起读的话：
+
+> "Helpfully, this is an event we're well prepared for thanks to the '**storm**' drills
+> we've been running for a long time now. In a storm exercise, we simulate a major
+> system failure by taking a service, data center, or entire region offline, stress
+> testing all the infrastructure and software involved."
+
+> "And **while we've never previously run a storm that simulated our global backbone
+> being taken offline**, we'll certainly be looking for ways to simulate events like
+> this moving forward."
+
+**两条可迁移的规则**：
+
+1. **观测通道会和被观测系统一起坏。** 本仓的形态更硬：`check-recovery.sh` 在 dsh 之外跑，
+   所以它不会和 dsh 一起死——**这是设计对了的地方**；但它的**通知通道**
+   （`dsh-wsl-notify`）和它读的**存储**如果都在同一台机器上，那还是同一个失败域。
+2. **"我们演练过了"必须连着"演练的是哪个场景"一起说。** Meta 的 storm 演练是长期在跑的、
+   有效的，但没有覆盖"整个骨干网消失"。**演练覆盖的永远是你想得到的失败。**
+   → 这条直接回答本仓 README.zh.md §10 开放问题 6（break-glass 路径怎么演练）：
+   **先写下"哪些场景没被演练过"，那才是缺口清单。**
+
+#### 这一节剩下的、我没找到的
+
+见 §9「没找到答案的问题」第 4 条。
 
 ---
 
