@@ -12,10 +12,10 @@
     },
     {
       "id": "L4.3",
-      "objective": "世界模型的通道设计：多时点快照差分 / 会议录音与 POI 对照 / (未来) 眼镜",
+      "objective": "多时点观测的差分通道：快照差分 / 会期与现场数据的对照 /（未来）可穿戴输入",
       "evidence": "test -f ~/src/dsh-steward/artifacts/poi_drift.json",
       "verify": "ls -la ~/src/dsh-steward/artifacts/poi_drift.json 2>/dev/null || echo \"NOT COMPUTED\"",
-      "why": "用户 2026-09-28 夜：你越懂我，我就能把物理世界给到你，然后整合世界模型。现有条件下的第一步是用多个备份时点算 POI 漂移，产出写进本仓的 artifacts/。"
+      "why": "同一处空间在不同时点的观测会互相矛盾，而矛盾本身是信号不是噪声。现有条件下的第一步：用多个备份时点算同一批 POI 的漂移，产出写进本仓的 artifacts/。"
     }
   ]
 }
