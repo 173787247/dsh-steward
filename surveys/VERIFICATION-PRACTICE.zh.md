@@ -35,7 +35,7 @@
 
 | 标记 | 含义 |
 |---|---|
-| **[源码]** | 我读了实际的代码 / 仓库文件 / 测试源文件。包括本机 `/home/rchua/src/` 下的仓库。 |
+| **[源码]** | 我读了实际的代码 / 仓库文件 / 测试源文件。包括本机 `$HOME/src/` 下的仓库。 |
 | **[文档]** | 我只读了文档、事故报告、书籍章节、博客。**没有**读它的实现。 |
 | **[本仓口述]** | 来自本仓（dsh-steward）内部当事人的转述，没有公开 URL。**单独标注，不与公开来源混同。** |
 
@@ -60,7 +60,7 @@
 
 | 未命中的原因 | 条数 | 处理 |
 |---|---|---|
-| 引文来自**本机源码**（`/home/rchua/src/...`），不在语料里 | 9 | 这些是我直接 `read` 的，已在附录 A 登记 |
+| 引文来自**本机源码**（`$HOME/src/...`），不在语料里 | 9 | 这些是我直接 `read` 的，已在附录 A 登记 |
 | 引文来自**双栏 OCR 的 PDF**，栏内换行把词切开了 | 8 | 逐片段核对通过（见上方的 OCR 说明）；`grep -F` 每片都命中 |
 | 引文来自**网页里由 JS 渲染的部分**，重抓拿不到正文 | 5 | 用首次 `web_fetch` 的原文核对（那些页面当时返回了完整正文） |
 | 引文是**网页摘要**而不是 PDF 正文（Google 变异论文的摘要） | 4 | 在 PDF 正文里逐关键词命中（`infeasably expensive` / `arid lines` 等） |
@@ -83,7 +83,7 @@
 
 **[源码]** 本机 `cordis-dsh-audit` 已经把这件事写成了目录级的设计原则：
 
-- `/home/rchua/src/cordis-dsh-audit/invariants/README.md`
+- `$HOME/src/cordis-dsh-audit/invariants/README.md`
 
 > "So this directory tests the **claim**, not the implementation. A scenario here
 > never asserts that a particular fix is present — it asserts that a property
@@ -202,7 +202,7 @@ URL：<https://abseil.io/resources/swe-book/html/ch12.html>
 
 ### 2.1 本仓已有的差分运行器（先读它，再看别人）
 
-**[源码]** `/home/rchua/src/cordis-dsh-audit/invariants/run.mjs`
+**[源码]** `$HOME/src/cordis-dsh-audit/invariants/run.mjs`
 
 它的结构：
 
@@ -1562,7 +1562,7 @@ if (bad) { console.log("  Refusing to run: a parser that reads garbage as a verd
 
 ### 8.4 `check-recovery.sh` —— 一半做到了，一半只在散文里
 
-**[源码]** `/home/rchua/src/dsh-wsl-kit/scripts/check-recovery.sh`（174 行）。
+**[源码]** `$HOME/src/dsh-wsl-kit/scripts/check-recovery.sh`（174 行）。
 它做对的地方：脚本头的注释把**每一条检查对应哪一次真实事故**写下来了：
 
 ```
@@ -1749,13 +1749,13 @@ self-adaptive systems 的测试与验证（Cheng、de Lemos、Cámara、Frederic
 
 | 路径 | 我读了什么 |
 |---|---|
-| `/home/rchua/src/dsh-steward/README.zh.md` | 全文（约束 4.1、闭环 3、缺失的两步 3.1、分阶段 7、开放问题 10） |
-| `/home/rchua/src/cordis-dsh-audit/invariants/README.md` | 全文（性质 vs 修复、AGREE/DIVERGE/BOTH-FAIL、第一次跑的三个错断言） |
-| `/home/rchua/src/cordis-dsh-audit/invariants/run.mjs` | 全文（两线定义、三种结果、INCONCLUSIVE 的处理） |
-| `/home/rchua/src/cordis-dsh-audit/invariants/i1-revert-exactly-once.mjs` | 全文（"asserts the property" 的文件头注释与四个子场景） |
-| `/home/rchua/src/dsh-steward/steward.mjs` | `VACUOUS` 列表、`holds()`、`--selftest` 的 5 个探针与 `exit(9)` 闸门 |
-| `/home/rchua/src/dsh-steward/nudge.mjs` | `--selftest` 的 10 个探针、失败方向的设计理由、`exit(9)` 闸门 |
-| `/home/rchua/src/dsh-wsl-kit/scripts/check-recovery.sh` | 脚本头 7 类检查、`ok`/`bad`/`note` 结构（12 处调用点）、尾部退出逻辑 |
+| `$HOME/src/dsh-steward/README.zh.md` | 全文（约束 4.1、闭环 3、缺失的两步 3.1、分阶段 7、开放问题 10） |
+| `$HOME/src/cordis-dsh-audit/invariants/README.md` | 全文（性质 vs 修复、AGREE/DIVERGE/BOTH-FAIL、第一次跑的三个错断言） |
+| `$HOME/src/cordis-dsh-audit/invariants/run.mjs` | 全文（两线定义、三种结果、INCONCLUSIVE 的处理） |
+| `$HOME/src/cordis-dsh-audit/invariants/i1-revert-exactly-once.mjs` | 全文（"asserts the property" 的文件头注释与四个子场景） |
+| `$HOME/src/dsh-steward/steward.mjs` | `VACUOUS` 列表、`holds()`、`--selftest` 的 5 个探针与 `exit(9)` 闸门 |
+| `$HOME/src/dsh-steward/nudge.mjs` | `--selftest` 的 10 个探针、失败方向的设计理由、`exit(9)` 闸门 |
+| `$HOME/src/dsh-wsl-kit/scripts/check-recovery.sh` | 脚本头 7 类检查、`ok`/`bad`/`note` 结构（12 处调用点）、尾部退出逻辑 |
 
 ## 附录 B：外部来源清单（URL + 等级）
 

@@ -6,8 +6,8 @@
     {
       "id": "L2.1",
       "objective": "短消息逐条 + 按会话聚合的对话节奏条目",
-      "evidence": "python3 -c \"import json;d=json.load(open('/home/rchua/.dsh/vecmem/store.json',encoding='utf-8',errors='surrogatepass'));k=[(i.get('meta') or {}).get('kind') for i in d['items']];import sys;sys.exit(0 if k.count('rhythm')>0 and k.count('short-turn')>0 else 1)\"",
-      "verify": "node --input-type=module -e \"import{createVecmem}from'/home/rchua/.dsh/profiles/web/node_modules/dsh-wsl-vecmem/lib/store.js';const v=createVecmem({embedModel:'qwen3-embedding:8b'});for(const q of ['ACP 认证考试','报名了什么考试']){const r=await v.search({query:q,topK:5});console.log(q,r.confidence,r.topScore)}\"",
+      "evidence": "python3 -c \"import json;d=json.load(open('$HOME/.dsh/vecmem/store.json',encoding='utf-8',errors='surrogatepass'));k=[(i.get('meta') or {}).get('kind') for i in d['items']];import sys;sys.exit(0 if k.count('rhythm')>0 and k.count('short-turn')>0 else 1)\"",
+      "verify": "node --input-type=module -e \"import{createVecmem}from'$HOME/.dsh/profiles/web/node_modules/dsh-wsl-vecmem/lib/store.js';const v=createVecmem({embedModel:'qwen3-embedding:8b'});for(const q of ['ACP 认证考试','报名了什么考试']){const r=await v.search({query:q,topK:5});console.log(q,r.confidence,r.topScore)}\"",
       "why": "2026-09-29 完成。1,528 条 kind=short-turn + 69 条 kind=rhythm。调研证实了方向：五家记忆系统无一以原始短消息作检索单元，MemoryOS/Graphiti/Letta 都绑成更大的单元，mem0/Letta 直接丢弃。★ 而调研指出的真实空白我们也撞上了：没有任何系统把连续多轮同向短回复聚合成一个意图单元 —— 那部分是原创，没有先例。★★ 顺带发现并修掉一个真实检索缺陷：返回裸列表，调用方分不清\"找到了\"和\"没有匹配\"（问\"报名了什么考试\"时全部分数 0.0274..0.0028，而库里其实有那条数据）。现在返回 confidence / topScore，并且去掉 topK 的静默 20 上限。"
     },
     {

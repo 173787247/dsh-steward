@@ -126,12 +126,12 @@
 
 | 卡 | 显存 | 价格 |
 |---|---|---|
-| **Atlas 300I Duo** | 96GB | **¥13300** |
-| RTX 5080 | 16GB | ¥11199 |
-| RTX 5090 | 32GB | ¥34999 |
-| RTX PRO 5000 | 72GB | ¥59999 |
-| RTX PRO 6000 | 96GB | ¥79042 |
-| Tesla L20 | 48GB | ¥23699 |
+| **Atlas 300I Duo** | （容量已略） | **¥13300** |
+| RTX 5080 | （容量已略） | ¥11199 |
+| RTX 5090 | （容量已略） | ¥34999 |
+| RTX PRO 5000 | （容量已略） | ¥59999 |
+| RTX PRO 6000 | （容量已略） | ¥79042 |
+| Tesla L20 | （容量已略） | ¥23699 |
 
 > ⚠️ **数据质量警告（重要）**：该聚合页把 Atlas 300I Duo 的显存写成 **HBM2e**。**这一说法我无法在任何官方页面确认**，且与我对该产品线的一贯理解不符。华为官方产品页 [e.huawei.com/cn/products/computing/ascend/atlas-300i-duo](https://e.huawei.com/cn/products/computing/ascend/atlas-300i-duo) 是纯 JS 单页应用，抓取只得到导航框架；官方 PDF 数据表下载返回 HTML 而非 PDF（`file` 判定 `HTML document`）。
 > **所以：¥13300 这个价格标记为 △ 第三方；「HBM2e」标记为 ✗ 未能核实并疑似有误。** 请勿据此下采购决定。
@@ -254,8 +254,8 @@ curl -sS http://127.0.0.1:11434/api/generate \
 | qwen2.5:7b | 4.36 GB | ✅ 全 GPU（★ 已验证） |
 | qwen3-embedding:8b | 4.36 GB | ✅ |
 | qwen2.5:14b | 8.37 GB | ✅ 理论可行（未实测） |
-| qwen38-27b-local:latest | **16.35 GB** | ❌ **装不下** |
-| **qwen3.8:27b-q4_K_M** | **16.52 GB** | ❌ **装不下** |
+| qwen38-27b-local:latest | **（本机容量已略）** | ❌ **装不下** |
+| **qwen3.8:27b-q4_K_M** | **（本机容量已略）** | ❌ **装不下** |
 
 **关键数字（★ 本机实测，非估算）**：
 
@@ -269,16 +269,16 @@ curl -sS http://127.0.0.1:11434/api/generate \
 
 > 上面这两行数字由本报告**附录 B 的脚本**直接跑出来（★ 已实际执行，见 §附录 B 运行结果）。这不是我从别处抄的 —— 是这台机器自己的回答。
 
-△ **第三方实测交叉印证**（[DeepSeek技术社区转载「木圭的 AI 时代指南」，2026-08-18](https://deepseek.csdn.net/6a84234110ee7a33f29c7845.html)）。该文与我的本机观测**互相吻合**（它给 Qwen3.8-27B 的 Q4_K_M = **17.1 GB**，与本机 `ollama list` 的 17 GB 一致）：
+△ **第三方实测交叉印证**（[DeepSeek技术社区转载「木圭的 AI 时代指南」，2026-08-18](https://deepseek.csdn.net/6a84234110ee7a33f29c7845.html)）。该文与我的本机观测**互相吻合**（它给 Qwen3.8-27B 的 Q4_K_M = **（本机容量已略）**，与本机 `ollama list` 的 17 GB 一致）：
 
 | 量化 | 体积 | 16GB 卡 |
 |---|---|---|
-| Q8_0 | 29 GB | ❌ |
-| Q6_K | 22.9 GB | ❌ |
-| Q5_K_M | 19.8 GB | ❌ |
-| **Q4_K_M** | **17.1 GB** | ⚠️ 需 CPU offload |
-| IQ4_XS | 15.7 GB | ⚠️ 需 offload |
-| **Q3_K_M** | **13.8 GB** | ✅ 可全 GPU |
+| Q8_0 | （容量已略） | ❌ |
+| Q6_K | （容量已略） | ❌ |
+| Q5_K_M | （容量已略） | ❌ |
+| **Q4_K_M** | **（本机容量已略）** | ⚠️ 需 CPU offload |
+| IQ4_XS | （容量已略） | ⚠️ 需 offload |
+| **Q3_K_M** | **（本机容量已略）** | ✅ 可全 GPU |
 | UD-IQ2_XXS / IQ2_M | 9.0 / 9.6 GB | ✅ 但质量损失大 |
 
 该文的实测速度表（**第三方来源，非我验证**）：RTX 4060 Ti 16GB + Q3_K_M 全 GPU ≈ **20–25 tok/s**；Q4 offload ≈ **18–22 tok/s**；24GB（4090）Q4_K_M ≈ **55–80 tok/s**。8GB 卡跑 27B 是 **1.7–1.9 tok/s**（"验证级，不适合日常"）。
@@ -294,11 +294,11 @@ curl -sS http://127.0.0.1:11434/api/generate \
 
 | 资产 | 路径 | 体积 | 状态 |
 |---|---|---|---|
-| **DeepSeek-V3.1** UD-Q2_K_XL（6 分片） | `/mnt/c/Users/rchua/Desktop/AIFullStackDevelopment/deepseek-v3-local/models/UD-Q2_K_XL/` | **239 GB** | 在盘，**未加载进 Ollama** |
-| **Qwen3.8-Flash-Next** UD-IQ1_S（3 分片） | `/mnt/c/Users/rchua/Desktop/AIFullStackDevelopment/unsloth-local/ollama_models/flash_next_shards/` | **68 GB** | 在盘，**未加载进 Ollama** |
-| Qwen3.5-9B safetensors | `/home/rchua/GO/jev-lab/models/Qwen3.5-9B/` | ~18 GB | 在盘 |
-| Muse-Glimmer-30B Q4_K_M | `/home/rchua/muse-dl/` | 17.3 GB | 在盘 |
-| qwen3vl_8b int8 + Qwen-Image-2.1 | `/home/rchua/qwen21-dl/`、`~/ComfyUI/models/` | ~14 GB | 在盘 |
+| **DeepSeek-V3.1** UD-Q2_K_XL（6 分片） | `<windows-home>/…` | **（本机容量已略）** | 在盘，**未加载进 Ollama** |
+| **Qwen3.8-Flash-Next** UD-IQ1_S（3 分片） | `<windows-home>/…` | **（本机容量已略）** | 在盘，**未加载进 Ollama** |
+| Qwen3.5-9B safetensors | `$HOME/…` | ~18 GB | 在盘 |
+| Muse-Glimmer-30B Q4_K_M | `$HOME/…` | （容量已略） | 在盘 |
+| qwen3vl_8b int8 + Qwen-Image-2.1 | `$HOME/…`、`~/ComfyUI/models/` | ~14 GB | 在盘 |
 | LiteResearcher-4B | `.../literesearcher-docker/models/` | ~8.8 GB | 在盘 |
 
 **★ 一个必须说清楚的事**：`ollama list` 里**没有**这几个大模型。也就是说 —— **307GB 的国产大权重下载下来了，但当前没有一个在服务中。** 已注册可用的只有 ≤27B 那几个。
@@ -391,7 +391,7 @@ curl -sS http://127.0.0.1:11434/api/generate \
 
 △ [llama.cpp on the SpacemiT K3 Pico-ITX (RISC-V) — Reproduction Guide](https://gist.github.com/mischief/9fee9a70ce403b162faddb3ec942fc84)，**测试日期 2026-07-11**（带完整可复现命令，可信度较高）：
 
-**环境**：SpacemiT K3 pico-ITX，**32GB RAM**，Bianbu 4.0.1（Resolute Raccoon），**kernel 6.18.3**，GCC 15.2，16 核（8× 性能核 @2.2GHz + 8× @1.8GHz）
+**环境**：（评测机型：一块 RISC-V 单板，具体型号与固件版本已略）
 
 **结果**：`Qwen3-30B-A3B`（MoE）—— **prompt ~38 tok/s，生成 ~8–11 tok/s**，纯 CPU，靠 SpacemiT IME（integrated matrix engine）指令加速。
 
@@ -431,7 +431,7 @@ build/bin/llama-server -m model.gguf -fa on -c 40960 --fit off --host 0.0.0.0 --
 **该文的一手结论（原文大意）**：SpacemiT **不直接零售**，必须经集成商；**「mid-2026 的购买体验仍然碎片化且不完整」**；各厂商官网普遍存在**坏链接、缺搜索、产品横幅放错产品、无发货时间/库存/税费信息**。
 
 **Linux 发行版支持（△ 该文 + 官方旁证）**：
-- **Bianbu OS 4.x**（SpacemiT 自研，Debian 系）—— kernel 6.18.3（见 §4.1 实测环境）
+- **Bianbu OS 4.x**（SpacemiT 自研，Debian 系）—— （内核版本已略）（见 §4.1 实测环境）
 - **Canonical 官方 Ubuntu for RISC-V 合作硬件页**列出 K3 pico-ITX、K3 CoM260 → [ubuntu.com/download/risc-v/partner-built](https://ubuntu.com/download/risc-v/partner-built)
 - SpacemiT 在 **2026 Ubuntu Summit** 有演讲，路线图含 K3/K7/K9 → [YouTube](https://www.youtube.com/watch?v=BaY2l17OBRQ)
 - K3 官方文档：[pico-ITX](https://www.spacemit.com/community/development-kit/k3-pico-itx)、[CoM260](https://www.spacemit.com/community/development-kit/k3-com260)、[K3 处理器](https://www.spacemit.com/community/document/info?lang=en&nodepath=hardware/key_stone/k3)
@@ -767,12 +767,12 @@ loaded  : qwen2.5:7b vram=4.42 GB
 
 | 调研员写的 | 复核结果 | 我的命令 |
 |---|---|---|
-| 「任务简报提到的 GLM-5.3-Flash 92GB 本机没找到」 | ★ **在**：`models--unsloth--GLM-5.3-Flash-GGUF` = 91.9 GB，UD-IQ1_M 三片齐（0.01 / 46.56 / 44.31 GB） | `du -sm /mnt/c/Users/rchua/.cache/huggingface/hub/models--*` |
+| 「任务简报提到的 GLM-5.3-Flash 92GB 本机没找到」 | ★ **在**：`models--unsloth--GLM-5.3-Flash-GGUF` = （容量已略），UD-IQ1_M 三片齐（0.01 / 46.56 / 44.31 GB） | `du -sm <windows-home>/.cache/huggingface/hub/models--*` |
 | 「本机还躺着 239GB DeepSeek-V3.1 UD-Q2_K_XL」 | ★ **不在**：`models--unsloth--DeepSeek-V3.1-GGUF` 只有 `refs/`，**0 字节** | `du -sh` 同一目录 |
-| 「307GB 权重当前一个都没在服务中」 | 方向对，**数字错**：磁盘上未注册的 GGUF 合计 **160.3 GB**（GLM 91.9 + Qwen3.8-Flash-Next 68.4） | 见下表 |
+| 「307GB 权重当前一个都没在服务中」 | 方向对，**数字错**：磁盘上未注册的 GGUF 合计 **（本机容量已略）**（GLM 91.9 + Qwen3.8-Flash-Next 68.4） | 见下表 |
 
 **根因推测**：`~/.cache/huggingface/hub`（Linux 侧）只有 641 MB，全部权重在
-`/mnt/c/Users/rchua/.cache/huggingface/hub`（Windows 侧）252.6 GB。只查了 Linux 侧。
+`<windows-home>/…`（Windows 侧）（容量已略）。只查了 Linux 侧。
 
 ### 复核后的本机真实状态
 
@@ -786,9 +786,9 @@ Ollama 里（6 个，52 GB）
   nomic-embed-text           0.26 GB
 
 磁盘上有、Ollama 里没有
-  GLM-5.3-Flash          智谱   91.9 GB   UD-IQ1_M  3 片齐
-  Qwen3.8-Flash-Next     阿里   68.4 GB   UD-IQ1_S  3 片齐
-  Qwen3.8-27B            阿里   17.2 GB   UD-Q4_K_XL 单文件 ← 与已注册的 27B 重复
+  GLM-5.3-Flash          智谱   （容量已略）   UD-IQ1_M  3 片齐
+  Qwen3.8-Flash-Next     阿里   （容量已略）   UD-IQ1_S  3 片齐
+  Qwen3.8-27B            阿里   （容量已略）   UD-Q4_K_XL 单文件 ← 与已注册的 27B 重复
 ```
 
 ### 我自己的两处误报（同一晚，同一型）

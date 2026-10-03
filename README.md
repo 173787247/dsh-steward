@@ -17,7 +17,7 @@ own** — a person pushed each one.
 | 1 | `~/.dsh/.env` carried twelve `DSH_*` names | user: "test restarting" | dsh refuses to start; **every future restart fails permanently** |
 | 2 | `Start-Process -ArgumentList` split the command | user: "test another port" | recovery path did nothing |
 | 3 | unquoted `$PATH` containing `Program Files (x86)` | derived from 2 | same |
-| 4 | desktop shortcut pointed at `/home/rchua/...` | while reading the `.lnk` | same |
+| 4 | desktop shortcut pointed at `$HOME/...` | while reading the `.lnk` | same |
 | 5 | `WSL_DISTRO_NAME` missing → distro name `"WSL"` | user: "clicked it, nothing happened" | `\\wsl.localhost\WSL\` does not exist |
 | 6 | generated `.ps1` had no BOM → GBK misalignment ate a quote | user: "I haven't clicked yet" | parse failure; **the error pointed at a correct line** |
 | 7 | `vecmem` metadata overwritten in the old format | user: "should the ceiling go up?" | search returned zero hits and reported success |

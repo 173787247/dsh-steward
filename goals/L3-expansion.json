@@ -19,8 +19,8 @@
     },
     {
       "id": "L3.3",
-      "objective": "mall 项目的 Layer 3-7：竞争图谱 / 相似度 / 招商缺口 / 聚类",
-      "evidence": "test -f ~/src/dsh-steward/artifacts/mall_competition.json",
+      "objective": "空间数据项目的 Layer 3-7：竞争图谱 / 相似度 / 招商缺口 / 聚类",
+      "evidence": "test -f ~/src/dsh-steward/artifacts/spatial_competition.json",
       "verify": "ls -la ~/src/dsh-steward/artifacts/ 2>/dev/null || echo \"NOT BUILT\"",
       "why": "报告里描述的七层，实际只做到索引和特征。它是 L3 里唯一有真实数据支撑的。产出写进本仓的 artifacts/，不指向任何外部目录。"
     },

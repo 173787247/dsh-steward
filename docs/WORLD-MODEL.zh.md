@@ -70,10 +70,10 @@
 ### 3.1 已有的多时点快照
 
 ```
-temp/amap_mall_data.bak.json                 13,802 条
-temp/amap_mall_data.bak2.json                13,841 条
-temp/amap_mall_data.bak_national_0813_1119   13,965 条
-temp/amap_mall_data.json                     13,981 条
+temp/amap_spatial_data.bak.json                 13,802 条
+temp/amap_spatial_data.bak2.json                13,841 条
+temp/amap_spatial_data.bak_national_0813_1119   13,965 条
+temp/amap_spatial_data.json                     13,981 条
 ```
 
 **★★ 四个时点，同一批场。它们之间**变化了的那些记录**，就是物理世界确实动过的证据。**

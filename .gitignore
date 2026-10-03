@@ -12,3 +12,6 @@ node_modules/
 *.pem
 *.key
 credentials*.yaml
+
+# 不公开：第三方业务复盘与本机快照
+private/
