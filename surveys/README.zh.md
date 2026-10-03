@@ -1,6 +1,6 @@
 # surveys/
 
-五路并行调研，主题只有一个：**怎么做自主进化迭代更新。**
+六路调研，主题只有一个：**怎么做自主进化迭代更新。**
 
 | # | 主题 | 产出 |
 |---|---|---|
@@ -9,6 +9,7 @@
 | 3 | 会改自己的系统怎么验证 | `VERIFICATION-PRACTICE.zh.md` |
 | 4 | 单机无人值守自治运维的成熟做法 | `SINGLE-MACHINE-AUTONOMY.zh.md` |
 | 5 | 国产化替代栈的实际可用性 | `CHINA-STACK.zh.md` |
+| 6 | anomalyco/opencode（21 万 star 的成熟同类）能学到什么 | `OPENCODE.zh.md` |
 
 ## ★ 先读这份
 

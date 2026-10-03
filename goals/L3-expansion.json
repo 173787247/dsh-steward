@@ -23,6 +23,27 @@
       "evidence": "test -f ~/src/dsh-steward/artifacts/mall_competition.json",
       "verify": "ls -la ~/src/dsh-steward/artifacts/ 2>/dev/null || echo \"NOT BUILT\"",
       "why": "报告里描述的七层，实际只做到索引和特征。它是 L3 里唯一有真实数据支撑的。产出写进本仓的 artifacts/，不指向任何外部目录。"
+    },
+    {
+      "id": "L3.4",
+      "objective": "「一个 provider turn」对照：opencode 的 turn 原语 vs dsh-llm-retry 现状",
+      "evidence": "test -f ~/src/dsh-steward/docs/PROVIDER-TURN.zh.md",
+      "verify": "sed -n '1,40p' ~/src/dsh-steward/docs/PROVIDER-TURN.zh.md 2>/dev/null || echo 'NOT WRITTEN'",
+      "why": "来自 surveys/OPENCODE.zh.md §4.2。它是【有真实故障支撑】的一条：会议录音 session 每次尝试跑约 907 秒后报 SSE event type mismatch（dsh-llm-deepseek/lib/index.js:1785 的判据是 frame.event !== event.data.type），而 dsh-llm-retry 在【流之外】重试。要做的是判断该不该把「一个 turn」建模成显式原语。"
+    },
+    {
+      "id": "L3.5",
+      "objective": "词汇表被真正使用（不是写完放着）",
+      "evidence": "grep -rlq 'TERMS.zh.md' ~/GO/START-HERE-*.md ~/src/dsh-steward/docs/*.zh.md 2>/dev/null && ! grep -rlq 'TERMS.zh.md' ~/src/dsh-steward/docs/TERMS.zh.md",
+      "verify": "grep -rln 'TERMS.zh.md' ~/GO/START-HERE-*.md ~/src/dsh-steward/docs/ ~/src/dsh-steward/surveys/ 2>/dev/null",
+      "why": "docs/TERMS.zh.md 已写（体例借自 opencode 的 CONTEXT.md）。但一份没人引用的词汇表等于没写 —— 这条判据是【至少有一份交接或设计文档引用它】，而不是【文件存在】。★ evidence 里排除了它自己。"
+    },
+    {
+      "id": "L3.6",
+      "objective": "依赖方向可自动检查（cordis 插件之间不许任意 import）",
+      "evidence": "test -x ~/src/dsh-steward/invariants/deps-direction.sh && bash ~/src/dsh-steward/invariants/deps-direction.sh >/dev/null 2>&1",
+      "verify": "bash ~/src/dsh-steward/invariants/deps-direction.sh 2>&1 | tail -20",
+      "why": "来自 surveys/OPENCODE.zh.md §4.3。opencode 把「Schema → Core/Protocol → Server，Client 不得依赖 Core/Server」写成了明文规则；DSH 有 288 个包和 cordis 插件边界，却没有一条可自动检查的依赖规则。"
     }
   ]
 }

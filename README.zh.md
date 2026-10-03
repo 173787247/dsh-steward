@@ -6,6 +6,13 @@
 
 **状态：设计阶段。这里暂时不无人值守地做任何事，而这是刻意的 —— 见 [§4](#4-为什么现在还不动手)。**
 
+## 核心词汇
+
+**[`docs/TERMS.zh.md`](docs/TERMS.zh.md)** —— DSH 的核心词汇，每个词三段式（术语 → 释义 → `_Avoid_` 不要用哪个词），
+每条 `_Avoid_` 后面附一个真实事件。体例借自 opencode 的 `CONTEXT.md`。
+
+调研：**[`surveys/OPENCODE.zh.md`](surveys/OPENCODE.zh.md)** —— 21 万 star 的成熟同类，我们比它强在哪、弱在哪。
+
 ---
 
 ## 1. 它为什么存在
